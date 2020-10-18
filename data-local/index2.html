@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+
+<script src="jquery-3.3.1.min.js"></script>
+<script src="jquery.term-2.6.0.min.js"></script>
+<link href="jquery.term-2.6.0.min.css" rel="stylesheet"/>
+
+<script>
+jQuery(function($, undefined) {
+
+    let wsUrl = 'ws://' + document.location.host + '/ws';
+wsUrl = 'ws://172.217.28.1:8080/ws';
+//wsUrl = 'ws://192.168.3.83:8080/ws';
+
+//wsUrl = 'ws://192.168.244.1:8080/ws';
+//wsUrl = 'ws://esp32-a268.local:8080/ws';
+//wsUrl = 'ws://esp32-dev:8080/ws';
+
+//    wsUrl = 'ws://172.20.10.4:8080/ws';
+//    wsUrl = 'ws://esp32-f974.local:8080/ws';
+
+    let term = null;
+    let ws = null;
+    let isRetrying = false;
+    let noopSchedule = null;
+    let completionMenus = { };
+
+    let reinitWs = function() {
+        ws = new WebSocket(wsUrl);
+        ws.binaryType = "arraybuffer";
+        ws.onopen = function(event) {
+            if (term != null) {
+                term.echo("Connected to esp32");
+                term.set_prompt('esp32> ');
+            }
+            isRetrying = false;
+            noopSchedule = setInterval(function() { ws.send("noop"); }, 2000);
+            ws.send("internal menuInfo");
+        };
+        ws.onclose = function(event) {
+            if (!isRetrying) { // don't show errors if we've been retrying since last time
+                if (event.wasClean) {
+                    term.echo(`Connection closed cleanly, code=${event.code} reason=${event.reason}`);
+                } else {
+                    term.error(`Connection broken, code=${event.code} reason=${event.reason}`);
+                }
+                term.echo("Retrying connection");
+            }
+            term.set_prompt('esp32 (reconnecting)> ');
+            isRetrying = true;
+            clearInterval(noopSchedule);
+            noopSchedule = null;
+            setTimeout(() => { reinitWs(); }, 0);
+        };
+        ws.onerror = function(event) {
+            console.log("WebSocket error", JSON.stringify(event));
+            if (term != null && !isRetrying) {
+                term.error("WebSocket error: " + event.message);
+            }
+        };
+        ws.onmessage = function(event) {
+console.log("Got WS event: " + JSON.stringify(event) + "; data: " + typeof event.data);
+            var msg = "";
+            if (event.data instanceof ArrayBuffer){
+                msg = "BIN:";
+                var bytes = new Uint8Array(event.data);
+                for (var i = 0; i < bytes.length; i++) {
+                    msg += String.fromCharCode(bytes[i]);
+                }
+            } else {
+                msg = event.data;
+            }
+console.log("Got data: " + msg);
+
+            if (msg.startsWith("@internal:")) {
+console.log("Received internal message: " + msg);
+                let dataStr = msg.substr("@internal:".length);
+                let data = JSON.parse(dataStr);
+                if (data) {
+console.log("Getting service menus: " + JSON.stringify(data, null, 2));
+                    for (let i in data) {
+                        completionMenus[i] = data[i];
+                    }
+console.log("Service menus: " + JSON.stringify(completionMenus, null, 2));
+                } else {
+                    console.log("Got invalid JSON data for internal call: " + dataStr);
+                }
+            } else {
+                if (term != null) {
+                    term.echo("[[i;#ff7f49;;]esp32:] " + "[[;#d6d6d6;;]" + msg + "]");
+                }
+            }
+        };
+    };
+    reinitWs();
+
+    term = $('#term').terminal([
+        {
+            'cmd': function(command) {
+                if (command !== '') {
+                    try {
+                        var result = window.eval(command);
+                        if (result !== undefined) {
+                            this.echo(new String(result));
+                        }
+                    } catch(e) {
+                        this.error(new String(e));
+                    }
+                } else {
+                    this.echo('');
+                }
+            },
+            'help': {
+
+            },
+            '?': {
+
+            },
+            'ls': {
+
+            },
+            'll': {
+
+            },
+            'cat': {
+
+            },
+            'less': {
+
+            }
+        },
+        function(command) { // all the rest of the commands
+            this.echo("Running command \"" + command + "\"");
+            if (ws != null) {
+                ws.send(command);
+            }
+        }
+    ],
+    {
+        greetings: '        [[iug;#ff7f49;;]ESP32 command line interface]\n',
+        name: 'esp32-command',
+        height: 400,
+        prompt: (callback) => {
+            if (ws == null) {
+                callback('esp32 (not initialized)> ');
+            } else {
+                switch (ws.readyState) {
+                    case 0: callback('esp32 (connecting)> '); break;
+                    case 1: callback('esp32> '); break;
+                    case 2: callback('esp32 (closing)> '); break;
+                    case 3: callback('esp32 (closed)> '); break;
+                    default: callback('esp32 (?)> '); break;
+                }
+            }
+        },
+        completion: function(str, callback) {
+            let menus = completionMenus || { };
+            let menusLocal = {
+                'cmd': '--> Expecting: <javascript code executed in browser>',
+                'clear': "--> Clears the screen"
+            };
+            for (let k in menusLocal) {
+                menus[k] = menusLocal[k];
+            }
+
+            let command = this.before_cursor();
+
+            let words = command.split(/[\t ]+/);
+            // if we have a trailing space in command, we'll get one last element "",
+            // if we don't, then we don't want the last element so that we return the list
+            // of words for that last element
+            words.pop();
+
+            let findInMenu = function(m, words) {
+                if (words.length == 0) {
+                    if (typeof m == "string") {
+                        return m;
+                    } else if (typeof m == "object") {
+                        return Object.keys(m);
+                    } else {
+                        throw "Unsupported menu entry of type " + (typeof m) + "(" + JSON.stringify(m) + "), expecting string or object";
+                    }
+                }
+                if (typeof m == "object") {
+                    let m1 = m[words[0]];
+                    if (m1 !== undefined) {
+                        words.shift();
+                        return findInMenu(m1, words);
+                    } else {
+                        return [ ];
+                    }
+                } else if (typeof m == "string") {
+                    return m;
+                } else {
+                    throw "Unsupported menu entry of type " + (typeof m) + "(" + JSON.stringify(m) + "), expecting string or object";
+                }
+            }
+
+            var result = findInMenu(menus, words);
+            if (typeof result == "string") {
+                this.echo(this.get_prompt() + this.get_command());
+                this.echo(result);
+                callback([ ]);
+            } else {
+                callback(result);
+            }
+
+        }
+    });
+});
+</script>
+<body>
+    <div id='term'></div>
+</body>
+
+</html>
+
+

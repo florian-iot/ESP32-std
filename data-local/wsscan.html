@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+
+<script src="jquery-3.3.1.min.js"></script>
+
+<script>
+jQuery(function($, undefined) {
+
+class ScanIp {
+    constructor(ip, callback) {
+        this.calledBack = false;
+        this.callback = callback;
+        this.ip = ip;
+        this.timer = null;
+
+        let ws = new WebSocket("ws://" + ip + ":8080/ws");
+        ws.binaryType = "arraybuffer";
+        let scanner = this;
+        ws.onopen = function(event) {
+            scanner.timer = setTimeout(function() {
+                ws.close();
+                scanner.doCallback(false);
+            }, 1000);
+        };
+        ws.onclose = function(event) {
+            scanner.doCallback(false);
+        };
+        ws.onerror = function(event) {
+            ws.close();
+            scanner.doCallback(false);
+        };
+        ws.onmessage = function(event) {
+//console.log("Got WS event: " + JSON.stringify(event) + "; data: " + typeof event.data);
+            var msg = "";
+            ws.close();
+            if (event.data instanceof ArrayBuffer) {
+                // bin message
+                scanner.doCallback(false);
+            } else {
+                msg = event.data;
+                console.log("Got data: " + msg);
+                scanner.doCallback(true);
+            }
+        };
+    }
+
+    doCallback(arg) {
+        if (!this.calledBack) {
+            this.calledBack = true;
+            this.callback(this.ip, arg);
+            if (this.timer != null) {
+                clearTimeout(this.timer);
+                this.timer = null;
+            }
+        }
+    }
+
+}
+
+let running = 0;
+let ipDone = function(ip, passed) {
+    if (passed) {
+        console.log("IP " + ip + " passed");
+    }
+    --running;
+    if (running == 0) {
+        console.log("Terminated");
+    } else {
+    }
+};
+
+for (let i = 1; i <= 255; i++) {
+    ++running;
+    new ScanIp("192.168.3." + i, ipDone);
+}
+
+});
+</script>
+<body>
+    <div id='log'></div>
+</body>
+
+</html>
+
+

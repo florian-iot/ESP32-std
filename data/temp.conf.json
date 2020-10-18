@@ -1,0 +1,10 @@
+{
+  "default": {
+    "i2cAddress": 79,
+    "sdaPin": 21,
+    "sclPin": 22,
+    "enabled": false,
+    "log": true
+  },
+  "defaultKey": "default"
+}

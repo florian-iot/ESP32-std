@@ -1,0 +1,7 @@
+{
+  "default": {
+    "sdaPin": 21,
+    "sclPin": 22
+  },
+  "defaultKey": "default"
+}

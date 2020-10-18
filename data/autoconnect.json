@@ -1,0 +1,25 @@
+{
+  "autoconnect": {
+    // standalone
+    "autoReconnect": false,
+    "autoRise": true,
+    "immediateStart": true,
+    "portalTimeout": 1
+  },
+
+  // for reuse
+  "autoconnect parameters-standalone": {
+    // standalone
+    "autoReconnect": false,
+    "autoRise": true,
+    "immediateStart": true,
+    "portalTimeout": 1
+  },
+  "autoconnect parameters-connected": {
+    // connected
+    "autoReconnect": true,
+    "autoRise": true,
+    "immediateStart": false,
+    "portalTimeout": 10000
+  }
+}

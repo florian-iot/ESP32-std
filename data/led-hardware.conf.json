@@ -1,0 +1,11 @@
+{
+    "hardware": [
+        { "chip": "WS2811", "pin": 19, "count": 200 },
+        { "chip": "WS2811", "pin": 20, "count": 150 },
+        { "chip": "PL9823", "pin": 21, "count": 1 }
+    ],
+    "controllers": [
+        { "type": "Spark" },
+        { "type": "Meteor" }
+    ]
+}

@@ -1,0 +1,28 @@
+{
+  "default": {
+    "pinDir": 4,
+    "pinStep": 16,
+    "pinM0": 22,
+    "pinM1": 21,
+    "pinM2": 19,
+    "pinEnable": 23,
+    "pinReset": 18,
+    "pinSleep": 17,
+    "pinFault": 34,
+    "pinStopper": 26,
+    "pinStopperPowerSense": 36,
+    "pinBuzzer": 33,
+    "pinLed": 32,
+    "pinDebug": -1,
+    "serialDebug": true,
+    "enabled": false,
+    "accel": 400,
+    "maxSpeed": 100,
+    "microstepping": 16,
+    "keepTorque": false,
+    "ledColorDisabled": 260,
+    "ledColorIdle": 2050,
+    "ledColorActive": 524544
+  },
+  "defaultKey": "default"
+}

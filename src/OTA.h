@@ -3,6 +3,7 @@
 
 #include <ESPAsyncWebServer.h>
 #include "LogMgr.h"
+#include "Util.h"
 
 class OTA {
 private:
@@ -15,15 +16,19 @@ private:
     bool _updateSucceeded;
     int _uploadCount;
     bool _hasUpdateError;
-    bool (*_onUpdateStart)();
-    void (*_onUpdateEnd)(bool succeeded);
+
+    CallbackList<bool() > otaStartCallbacks;
+    CallbackList<void(bool success)> otaEndCallbacks;
 
     void updateError(AsyncWebServerRequest *request, PGM_P msg, ...);
 
 public:
     OTA();
     void init(AsyncWebServer *server, LogMgr *logMgr, bool (*onUpdateStart)(), void (*onUpdateEnd)(bool succeeded));
-
+    int onStart(std::function<bool()> fn);
+    void removeOnStart(int handle);
+    int onEnd(std::function<void(bool success)> fn);
+    void removeOnEnd(int handle);
 };
 
 

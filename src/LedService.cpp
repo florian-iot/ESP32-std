@@ -12,7 +12,7 @@
 #include "LedSparkEffect.h"
 #include "LedMeteorEffect.h"
 
-Effect::Effect(int controllerId, CRGB *leds, int totalLedCount, const char *description)
+Effect::Effect(int controllerId, LedMap1d *leds, int totalLedCount, const char *description)
 {
     this->leds = leds;
     this->totalLedCount = totalLedCount;
@@ -34,17 +34,22 @@ bool LedService::loadHardwareAndControllers(UEventLoop *eventLoop, CommandMgr *c
     DynamicJsonBuffer buf;
     JsonObject *params;
     const char *configFile = "/led-hardware.conf.json";
-    Serial.printf("Loading %s\n", configFile);
+    logger->info("Loading {}\n", LogValue(configFile, LogValue::STATIC));
     if (!SPIFFS.exists(configFile)) {
         // empty params
         params = &buf.createObject();
         (*params)["hardware"] = buf.createArray();
-        (*params)["controlles"] = buf.createArray();
+        (*params)["controllers"] = buf.createArray();
 
         const char *fileExample = R"(
 {
     "hardware": [
         // { chip: "WS2811", "rgbOrder": "RGB", "pin": 19, "count": 0 }
+        // or "PL9823"
+    ],
+    "mapping-1d": [ // optional 1d mapping
+        // { "start": 0, "count": 10, "mapTo": 0, "isReverse": true },
+        // { "start": 10, "count": 9, "mapTo": 10 }
     ],
     "controllers": [
         // must be a non-empty array of
@@ -63,13 +68,14 @@ bool LedService::loadHardwareAndControllers(UEventLoop *eventLoop, CommandMgr *c
         f.close();
         if (!cfg.success()) {
             initializationError = String("Error reading ") + configFile + ", incorrect JSON";
-            Serial.println(initializationError.c_str());
+            logger->error("{}", LogValue(initializationError.c_str(), LogValue::DO_COPY));
             params = nullptr;
             return false;
         } else {
             Serial.printf("Loaded %s: ", configFile);
-            cfg.prettyPrintTo(Serial);
-            Serial.println();
+            String str;
+            cfg.prettyPrintTo(str);
+            logger->error("Loaded {}: {}", LogValue(configFile, LogValue::STATIC), LogValue(str.c_str(), LogValue::DO_COPY));
             params = &cfg;
         }
     }
@@ -78,7 +84,7 @@ bool LedService::loadHardwareAndControllers(UEventLoop *eventLoop, CommandMgr *c
     if (h.size() >= LED_HARDWARE_COUNT) {
         initializationError = String("In config file ") + configFile + ", array \"hardware\" has "
             + h.size() + " elements, more than allowed " + LED_HARDWARE_COUNT;
-        Serial.println(initializationError);
+        logger->error("{}", LogValue(initializationError.c_str(), LogValue::DO_COPY));
         return false;
     }
     totalLedCount = 0;
@@ -90,7 +96,7 @@ bool LedService::loadHardwareAndControllers(UEventLoop *eventLoop, CommandMgr *c
             initializationError = String("In config file ") + configFile
                 + ", bad values chip " + (chip == nullptr ? "NULL" : chip)
                 + ", pin " + pin + ", count " + count;
-            Serial.println(initializationError);
+            logger->error("{}", LogValue(initializationError.c_str(), LogValue::DO_COPY));
             return false;
         } else {
             hardware[i].ledChip = chip;
@@ -102,19 +108,50 @@ bool LedService::loadHardwareAndControllers(UEventLoop *eventLoop, CommandMgr *c
         }
     }
 
-    // required here, because we create controllers just below and "leds" is needed
+    // required here, because we create controllers below and "leds" is needed; same for map1d
     leds = new CRGB[totalLedCount];
+    map1d.map = new uint16_t[totalLedCount];
+    for (int pos = 0; pos < totalLedCount; pos++) {
+        map1d.map[pos] = pos;
+    }
+    map1d.leds = leds;
+
+    const JsonVariant &m = (*params)["mapping-1d"];
+    if (m.is<JsonArray>()) {
+        int pos = 0;
+        for (int i = 0; i < m.size(); i++) {
+            int start = m[i]["start"] | -1;
+            int end = m[i]["end"] | -1;
+            if (start == -1 || end == -1) {
+                logger->error("Hardware init: invalid mapping-1d[{}], expecting { start, end }, ignoring", i);
+                break;
+            }
+            if (start < 0 || start >= totalLedCount || end < 0 || end >= totalLedCount) {
+                logger->error("Hardware init: invalid mapping-1d[{}], start or end out of range 0..{}, ignoring", i, totalLedCount - 1);
+                break;
+            }
+            if (start < end) {
+                for (int v = start; v <= end; v++) {
+                    map1d.map[pos++] = v;
+                }
+            } else {
+                for (int v = start; v >= end; v--) {
+                    map1d.map[pos++] = v;
+                }
+            }
+        }
+    }
 
     const JsonVariant &ctrl = (*params)["controllers"];
     if (!ctrl) {
         initializationError = String("Expecting \"controllers\" config file ") + configFile;
-        Serial.println(initializationError);
+        logger->error("{}", LogValue(initializationError.c_str(), LogValue::DO_COPY));
         return false;
     }
     if (ctrl.size() <= 0 || ctrl.size() > 100) {
         initializationError = String("The element \"controllers\" in config file ") + configFile
             + " must be a non-empty array of { \"type\": <\"spark\"|\"meteor\"> }";
-        Serial.println(initializationError);
+        logger->error("{}", LogValue(initializationError.c_str(), LogValue::DO_COPY));
         return false;
     }
     controllerCount = ctrl.size();
@@ -123,20 +160,19 @@ bool LedService::loadHardwareAndControllers(UEventLoop *eventLoop, CommandMgr *c
         const char *type = ctrl[i]["type"];
         if (type == nullptr || type[0] == '0') {
             initializationError = String("Expecting \"type\" in controllers[") + i + "] in config file " + configFile;
-            Serial.println(initializationError);
+            logger->error("{}", LogValue(initializationError.c_str(), LogValue::DO_COPY));
             return false;
         }
         int id = ctrl[i]["id"] | i;
         int ledStart = ctrl[i]["ledStart"] | 0;
         int ledCount = ctrl[i]["ledCount"] | totalLedCount;
         if (strcmp(type, "spark") == 0) {
-            controllers[i] = new EffectSparks(id, leds, totalLedCount, ledStart, ledCount, ctrl[i]["description"] | "" );
+            controllers[i] = new EffectSparks(id, &map1d, totalLedCount, ledStart, ledCount, ctrl[i]["description"] | "" );
         } else if (strcmp(type, "meteor") == 0) {
-            // TODO EffectMeteor
-            controllers[i] = new LedMeteorEffect(id, leds, totalLedCount, ledStart, ledCount, ctrl[i]["description"] | "" );
+            controllers[i] = new LedMeteorEffect(id, &map1d, totalLedCount, ledStart, ledCount, ctrl[i]["description"] | "" );
         } else {
             initializationError = String("Unrecognized controller type \"") + type + "\" in config file " + configFile;
-            Serial.println(initializationError);
+            logger->error("{}", LogValue(initializationError.c_str(), LogValue::DO_COPY));
             return false;
         }
     }
@@ -144,9 +180,25 @@ bool LedService::loadHardwareAndControllers(UEventLoop *eventLoop, CommandMgr *c
     return true;
 }
 
-void LedService::init(UEventLoop *eventLoop, CommandMgr *commandMgr)
+void LedService::showMap(String *msg)
+{
+    for (int i = 0; i < totalLedCount; i++) {
+        if (i % 10 == 0) {
+            if (i > 0) {
+                msg->concat("\n");
+            }
+            msg->concat(i);
+            msg->concat(":");
+        }
+        msg->concat(" ");
+        msg->concat(map1d.map[i]);
+    }
+}
+
+void LedService::init(UEventLoop *eventLoop, CommandMgr *commandMgr, LogMgr *logMgr)
 {
     this->eventLoop = eventLoop;
+    this->logger = logMgr->newLogger("Led");
     isInitialized = false;
 
     isEnabled = false;
@@ -160,8 +212,8 @@ void LedService::init(UEventLoop *eventLoop, CommandMgr *commandMgr)
         if (initializationError == nullptr) {
             initializationError = "Unspecified error while loading hardware configuration";
         }
-        Serial.printf("LED service hardware configuration was not performed, led service will not be active; initialization error: %s\n",
-            initializationError.c_str());
+        logger->error("LED service hardware configuration was not performed, led service will not be active; initialization error: {}",
+            LogValue(initializationError.c_str(), LogValue::DO_COPY));
         isEnabled = false;
     }
 
@@ -269,6 +321,45 @@ void LedService::init(UEventLoop *eventLoop, CommandMgr *commandMgr)
                 return 1000 / intervalMillis;
             }));
 
+    cmd->registerStringData(
+        ServiceCommands::StringDataBuilder("map", true)
+        .cmd("map")
+        .help("map [show] | map <index> <mapped index> --> Show or manipulate hardware map")
+        .isPersistent(false)
+        .setFn([this](const String &val, bool isLoading, String *msg) {
+            if (val == "show") {
+                *msg = "Map:\n";
+                showMap(msg);
+                return true;
+            }
+            int pos, map;
+            int rc = sscanf(val.c_str(), "%u %u", &pos, &map);
+            if ((rc == 1 || rc == 2) && (pos < 0 || pos >= totalLedCount)) {
+                *msg = "Position out of range";
+                return true;
+            }
+            if (rc == 2 && (map < 0 || map > totalLedCount)) {
+                *msg = "Mapped value out of range";
+                return true;
+            }
+
+            if (rc == 1) {
+                *msg = map1d.map[pos];
+            } else if (rc == 2) {
+                map1d.map[pos] = map;
+                *msg = "Mapped value set";
+            } else {
+                msg->concat(": could not scan <position> <map value>, rc = "); msg->concat(rc);
+            }
+            return true;
+        })
+        .getFn([this](String *msg) {
+            *msg = "Map:\n";
+            showMap(msg);
+            return true;
+        })
+    );
+
     cmd->onBeforeLoad([this](String *msg) {
         if (isEnabled) {
             disable();
@@ -342,7 +433,7 @@ void LedService::init(UEventLoop *eventLoop, CommandMgr *commandMgr)
         String controllerName;
         for (int c = 0; c < controllerCount; c++) {
             Effect *controller = controllers[c];
-            Serial.printf("Initializing controller led%d\n", c);
+            logger->info("Initializing controller led{}\n", c);
             controller->init(intervalMillis, commandMgr, frame);
         }
     }

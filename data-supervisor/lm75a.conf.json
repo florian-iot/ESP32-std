@@ -1,0 +1,9 @@
+{
+  "default": {
+    "enable": true,
+    "i2cAddress": 79,
+    "i2cPort": 1,
+    "tempOffset": 0
+  },
+  "defaultKey": "default"
+}

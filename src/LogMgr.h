@@ -17,14 +17,14 @@ class LogMgr;
 class Logger;
 
 enum LogLevel {
-    LOG_OFF,
-    LOG_FATAL,
-    LOG_ERROR,
-    LOG_WARN,
-    LOG_INFO,
-    LOG_DEBUG,
-    LOG_TRACE,
-    LOG_ALL
+    LOGLVL_OFF,
+    LOGLVL_FATAL,
+    LOGLVL_ERROR,
+    LOGLVL_WARN,
+    LOGLVL_INFO,
+    LOGLVL_DEBUG,
+    LOGLVL_TRACE,
+    LOGLVL_ALL
 };
 
 class LogValue {
@@ -48,7 +48,6 @@ class LogValue {
         UINT,
         FLOAT,
         DOUBLE,
-        CSTR,
         STR,
         FN
     };
@@ -62,13 +61,8 @@ public:
     LogValue(unsigned int val, const char *format = nullptr);
     LogValue(int64_t val, const char *format = nullptr);
     LogValue(uint64_t val, const char *format = nullptr);
+    LogValue(double val, const char *format = nullptr);
     LogValue(const char *val, const char *format = nullptr);
-    enum StrAction {
-        STATIC,
-        DO_FREE,
-        DO_COPY
-    };
-    LogValue(const char *val, StrAction strAction, const char *format = nullptr);
     typedef std::function<void (String *)> ValueFunction;
     LogValue(ValueFunction val, const char *format = nullptr);
 
@@ -87,6 +81,7 @@ private:
 class LogRecord {
 friend class LogMgr;
     const char *name; // not allocated
+    uint32_t timestamp;
     LogLevel level;
     const char *format; // not allocated
     int startingValueIdx; // index in LogMgr::values, where we serialize all values
@@ -144,7 +139,7 @@ class LogMgr {
     Queue<LogRecord> records;
     Queue<LogValue> values;
 public:
-    typedef std::function<uint64_t (LogMgr *logMgr, int flushFrom, int count)> FlushFunction;
+    typedef std::function<uint64_t (LogMgr *logMgr, uint64_t flushFrom, int count)> FlushFunction;
     // the flusher function returns the index of the next record it will want to flush
     // (normally, flushFrom + count, but could be flushFrom if nothing was flushed)
     typedef int FlusherHandle;
@@ -165,8 +160,11 @@ private:
     uint64_t nextRecordPos;
     uint64_t oldestRecordPosToFlush;
     volatile LogLevel globalLogLevel;
+    volatile bool isSerialImmediate; // print immediately to Serial, before putting in buffer
 
     void format(String *str, const char *format, int valueCount, LogValue **values);
+
+friend class LogService;
     void callFlushers();
 public:
     LogMgr();
@@ -186,10 +184,11 @@ public:
     void setCapacity(int records, int values);
     int getRecordsCapacity();
     void clear();
+    void setSerialImmediate(bool enable);
 
     uint64_t getFirstRecordIdx();
     uint64_t getLastRecordIdx();
-    bool getRecord(uint64_t idx, String *name, LogLevel *level, String *str);
+    bool getRecord(uint64_t idx, String *name, uint32_t *timestamp, LogLevel *level, String *str);
     const char *levelName(LogLevel level);
 
     FlusherHandle addFlusher(FlushFunction flushFunction);
@@ -234,36 +233,62 @@ public:
     void trace(const char *format, const LogValue &val1, const LogValue &val2);
     void trace(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3);
     void trace(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4);
+    void trace(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4,
+        const LogValue &val5);
+    void trace(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4,
+        const LogValue &val5, const LogValue &val6);
 
     void debug(const char *format);
     void debug(const char *format, const LogValue &val1);
     void debug(const char *format, const LogValue &val1, const LogValue &val2);
     void debug(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3);
     void debug(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4);
+    void debug(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4,
+        const LogValue &val5);
+    void debug(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4,
+        const LogValue &val5, const LogValue &val6);
+    void debug(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4,
+        const LogValue &val5, const LogValue &val6, const LogValue &val7);
 
     void info(const char *format);
     void info(const char *format, const LogValue &val1);
     void info(const char *format, const LogValue &val1, const LogValue &val2);
     void info(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3);
     void info(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4);
+    void info(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4,
+        const LogValue &val5);
+    void info(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4,
+        const LogValue &val5, const LogValue &val6);
 
     void warn(const char *format);
     void warn(const char *format, const LogValue &val1);
     void warn(const char *format, const LogValue &val1, const LogValue &val2);
     void warn(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3);
     void warn(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4);
+    void warn(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4,
+        const LogValue &val5);
+    void warn(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4,
+        const LogValue &val5, const LogValue &val6);
 
     void error(const char *format);
     void error(const char *format, const LogValue &val1);
     void error(const char *format, const LogValue &val1, const LogValue &val2);
     void error(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3);
     void error(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4);
+    void error(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4,
+        const LogValue &val5);
+    void error(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4,
+        const LogValue &val5, const LogValue &val6);
 
     void fatal(const char *format);
     void fatal(const char *format, const LogValue &val1);
     void fatal(const char *format, const LogValue &val1, const LogValue &val2);
     void fatal(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3);
     void fatal(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4);
+    void fatal(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4,
+        const LogValue &val5);
+    void fatal(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4,
+        const LogValue &val5, const LogValue &val6);
 
 };
 
@@ -273,6 +298,7 @@ private:
     UEventLoop *eventLoop;
     CommandMgr *commandMgr;
     UEventLoopTimer testTimer;
+    UEventLoopTimer logFlusherTimer;
     Logger *logger;
 
 #ifdef LOGGING_ENABLE_TESTS
@@ -281,6 +307,14 @@ private:
     void checkRecord(uint64_t idx, const char *msgToCompare);
     void testStart(const char *testName);
     void testEnd();
+#endif
+
+    void getLast(int val, String *msg, int minLevel);
+
+#ifdef LOGGING_USE_SYSLOG
+private:
+    String syslogServer;
+    int syslogPort;
 #endif
 
 public:
@@ -339,22 +373,16 @@ inline LogValue::LogValue(uint64_t val, const char *format)
     this->val.int64Val = val;
     this->format = format;
 }
-
-inline LogValue::LogValue(const char *val, const char *format)
+inline LogValue::LogValue(double val, const char *format)
 {
-    type = Type::CSTR;
-    this->val.cstrVal = val;
+    type = Type::DOUBLE;
+    this->val.doubleVal = val;
     this->format = format;
 }
-
-inline LogValue::LogValue(const char *val, LogValue::StrAction action, const char *format)
+inline LogValue::LogValue(const char *val, const char *format)
 {
-    type = (action == StrAction::DO_COPY || action == StrAction::DO_FREE) ? Type::STR : Type::CSTR;
-    if (action == DO_COPY) {
-        this->val.cstrVal = strdup(val);
-    } else {
-        this->val.cstrVal = val;
-    }
+    type = Type::STR;
+    this->val.cstrVal = strdup(val);
     this->format = format;
 }
 
@@ -375,7 +403,6 @@ inline LogValue::LogValue(const LogValue &other)
         case Type::UINT: val.int64Val = other.val.int64Val; break;
         case Type::DOUBLE: val.doubleVal = other.val.doubleVal; break;
         case Type::FLOAT: val.floatVal = other.val.floatVal; break;
-        case Type::CSTR : val.cstrVal = other.val.cstrVal; break;
         case Type::STR: val.cstrVal = other.val.cstrVal; const_cast<LogValue&>(other).val.cstrVal = nullptr; break;
         case Type::FN: val.fnVal = other.val.fnVal; const_cast<LogValue&>(other).val.fnVal = nullptr; break;
         case Type::VOID: break;
@@ -396,7 +423,6 @@ inline void LogValue::set(const LogValue &other)
         case Type::UINT: val.int64Val = other.val.int64Val; break;
         case Type::DOUBLE: val.doubleVal = other.val.doubleVal; break;
         case Type::FLOAT: val.floatVal = other.val.floatVal; break;
-        case Type::CSTR : val.cstrVal = other.val.cstrVal; break;
         case Type::STR: val.cstrVal = other.val.cstrVal; const_cast<LogValue&>(other).val.cstrVal = nullptr; break;
         case Type::FN: val.fnVal = other.val.fnVal; const_cast<LogValue&>(other).val.fnVal = nullptr; break;
         case Type::VOID: break;
@@ -419,7 +445,7 @@ inline void LogValue::clear()
 inline LogRecord::LogRecord()
 {
     name = nullptr;
-    level = LogLevel::LOG_FATAL;
+    level = LogLevel::LOGLVL_FATAL;
     format = nullptr;
     startingValueIdx = 0;
     valueCount = 0;
@@ -428,6 +454,7 @@ inline LogRecord::LogRecord()
 inline void LogRecord::set(const char *name, LogLevel level, const char *format, int startingValueIdx, int valueCount)
 {
     this->name = name;
+    this->timestamp = esp_log_timestamp();
     this->level = level;
     this->format = format;
     this->startingValueIdx = startingValueIdx;
@@ -437,6 +464,7 @@ inline void LogRecord::set(const char *name, LogLevel level, const char *format,
 inline void LogRecord::set(const LogRecord &other)
 {
     this->name = other.name;
+    this->timestamp = other.timestamp;
     this->level = other.level;
     this->format = other.format;
     this->startingValueIdx = other.startingValueIdx;
@@ -446,7 +474,8 @@ inline void LogRecord::set(const LogRecord &other)
 inline void LogRecord::clear()
 {
     this->name = nullptr;
-    this->level = LogLevel::LOG_FATAL;
+    this->timestamp = 0;
+    this->level = LogLevel::LOGLVL_FATAL;
     this->format = nullptr;
     this->startingValueIdx = -1;
     this->valueCount = 0;
@@ -475,32 +504,32 @@ inline LogLevel Logger::getLevel()
 
 inline bool Logger::isTrace()
 {
-    return logLevel >= LogLevel::LOG_TRACE;
+    return logLevel >= LogLevel::LOGLVL_TRACE;
 }
 
 inline bool Logger::isDebug()
 {
-    return logLevel >= LogLevel::LOG_DEBUG;
+    return logLevel >= LogLevel::LOGLVL_DEBUG;
 }
 
 inline bool Logger::isInfo()
 {
-    return logLevel >= LogLevel::LOG_INFO;
+    return logLevel >= LogLevel::LOGLVL_INFO;
 }
 
 inline bool Logger::isWarn()
 {
-    return logLevel >= LogLevel::LOG_WARN;
+    return logLevel >= LogLevel::LOGLVL_WARN;
 }
 
 inline bool Logger::isError()
 {
-    return logLevel >= LogLevel::LOG_ERROR;
+    return logLevel >= LogLevel::LOGLVL_ERROR;
 }
 
 inline bool Logger::isFatal()
 {
-    return logLevel >= LogLevel::LOG_FATAL;
+    return logLevel >= LogLevel::LOGLVL_FATAL;
 }
 
 inline void Logger::log(LogLevel level, const char *format)
@@ -564,134 +593,186 @@ inline void Logger::log(LogLevel level, const char *format, const LogValue &val1
 
 inline void Logger::trace(const char *format)
 {
-    logMgr->doLog(name, LogLevel::LOG_TRACE, format, 0);
+    logMgr->doLog(name, LogLevel::LOGLVL_TRACE, format, 0);
 }
 inline void Logger::trace(const char *format, const LogValue &val1)
 {
-    logMgr->doLog(name, LogLevel::LOG_TRACE, format, 1, &val1);
+    logMgr->doLog(name, LogLevel::LOGLVL_TRACE, format, 1, &val1);
 }
 inline void Logger::trace(const char *format, const LogValue &val1, const LogValue &val2)
 {
-    logMgr->doLog(name, LogLevel::LOG_TRACE, format, 2, &val1, &val2);
+    logMgr->doLog(name, LogLevel::LOGLVL_TRACE, format, 2, &val1, &val2);
 }
 inline void Logger::trace(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3)
 {
-    logMgr->doLog(name, LogLevel::LOG_TRACE, format, 3, &val1, &val2, &val3);
+    logMgr->doLog(name, LogLevel::LOGLVL_TRACE, format, 3, &val1, &val2, &val3);
 }
 inline void Logger::trace(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4)
 {
-    logMgr->doLog(name, LogLevel::LOG_TRACE, format, 4, &val1, &val2, &val3, &val4);
+    logMgr->doLog(name, LogLevel::LOGLVL_TRACE, format, 4, &val1, &val2, &val3, &val4);
+}
+inline void Logger::trace(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4, const LogValue &val5)
+{
+    logMgr->doLog(name, LogLevel::LOGLVL_TRACE, format, 5, &val1, &val2, &val3, &val4, &val5);
+}
+inline void Logger::trace(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4, const LogValue &val5, const LogValue &val6)
+{
+    logMgr->doLog(name, LogLevel::LOGLVL_TRACE, format, 6, &val1, &val2, &val3, &val4, &val5, &val6);
 }
 
 
 inline void Logger::debug(const char *format)
 {
-    logMgr->doLog(name, LogLevel::LOG_DEBUG, format, 0);
+    logMgr->doLog(name, LogLevel::LOGLVL_DEBUG, format, 0);
 }
 inline void Logger::debug(const char *format, const LogValue &val1)
 {
-    logMgr->doLog(name, LogLevel::LOG_DEBUG, format, 1, &val1);
+    logMgr->doLog(name, LogLevel::LOGLVL_DEBUG, format, 1, &val1);
 }
 inline void Logger::debug(const char *format, const LogValue &val1, const LogValue &val2)
 {
-    logMgr->doLog(name, LogLevel::LOG_DEBUG, format, 2, &val1, &val2);
+    logMgr->doLog(name, LogLevel::LOGLVL_DEBUG, format, 2, &val1, &val2);
 }
 inline void Logger::debug(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3)
 {
-    logMgr->doLog(name, LogLevel::LOG_DEBUG, format, 3, &val1, &val2, &val3);
+    logMgr->doLog(name, LogLevel::LOGLVL_DEBUG, format, 3, &val1, &val2, &val3);
 }
 inline void Logger::debug(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4)
 {
-    logMgr->doLog(name, LogLevel::LOG_DEBUG, format, 4, &val1, &val2, &val3, &val4);
+    logMgr->doLog(name, LogLevel::LOGLVL_DEBUG, format, 4, &val1, &val2, &val3, &val4);
+}
+inline void Logger::debug(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4, const LogValue &val5)
+{
+    logMgr->doLog(name, LogLevel::LOGLVL_DEBUG, format, 5, &val1, &val2, &val3, &val4, &val5);
+}
+inline void Logger::debug(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4, const LogValue &val5, const LogValue &val6)
+{
+    logMgr->doLog(name, LogLevel::LOGLVL_DEBUG, format, 6, &val1, &val2, &val3, &val4, &val5, &val6);
+}
+inline void Logger::debug(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4, const LogValue &val5, const LogValue &val6, const LogValue &val7)
+{
+    logMgr->doLog(name, LogLevel::LOGLVL_DEBUG, format, 6, &val1, &val2, &val3, &val4, &val5, &val6, &val7);
 }
 
 
 
 inline void Logger::info(const char *format)
 {
-    logMgr->doLog(name, LogLevel::LOG_INFO, format, 0);
+    logMgr->doLog(name, LogLevel::LOGLVL_INFO, format, 0);
 }
 inline void Logger::info(const char *format, const LogValue &val1)
 {
-    logMgr->doLog(name, LogLevel::LOG_INFO, format, 1, &val1);
+    logMgr->doLog(name, LogLevel::LOGLVL_INFO, format, 1, &val1);
 }
 inline void Logger::info(const char *format, const LogValue &val1, const LogValue &val2)
 {
-    logMgr->doLog(name, LogLevel::LOG_INFO, format, 2, &val1, &val2);
+    logMgr->doLog(name, LogLevel::LOGLVL_INFO, format, 2, &val1, &val2);
 }
 inline void Logger::info(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3)
 {
-    logMgr->doLog(name, LogLevel::LOG_INFO, format, 3, &val1, &val2, &val3);
+    logMgr->doLog(name, LogLevel::LOGLVL_INFO, format, 3, &val1, &val2, &val3);
 }
 inline void Logger::info(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4)
 {
-    logMgr->doLog(name, LogLevel::LOG_INFO, format, 4, &val1, &val2, &val3, &val4);
+    logMgr->doLog(name, LogLevel::LOGLVL_INFO, format, 4, &val1, &val2, &val3, &val4);
+}
+inline void Logger::info(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4, const LogValue &val5)
+{
+    logMgr->doLog(name, LogLevel::LOGLVL_INFO, format, 5, &val1, &val2, &val3, &val4, &val5);
+}
+inline void Logger::info(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4, const LogValue &val5, const LogValue &val6)
+{
+    logMgr->doLog(name, LogLevel::LOGLVL_INFO, format, 6, &val1, &val2, &val3, &val4, &val5, &val6);
 }
 
 
 inline void Logger::warn(const char *format)
 {
-    logMgr->doLog(name, LogLevel::LOG_WARN, format, 0);
+    logMgr->doLog(name, LogLevel::LOGLVL_WARN, format, 0);
 }
 inline void Logger::warn(const char *format, const LogValue &val1)
 {
-    logMgr->doLog(name, LogLevel::LOG_WARN, format, 1, &val1);
+    logMgr->doLog(name, LogLevel::LOGLVL_WARN, format, 1, &val1);
 }
 inline void Logger::warn(const char *format, const LogValue &val1, const LogValue &val2)
 {
-    logMgr->doLog(name, LogLevel::LOG_WARN, format, 2, &val1, &val2);
+    logMgr->doLog(name, LogLevel::LOGLVL_WARN, format, 2, &val1, &val2);
 }
 inline void Logger::warn(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3)
 {
-    logMgr->doLog(name, LogLevel::LOG_WARN, format, 3, &val1, &val2, &val3);
+    logMgr->doLog(name, LogLevel::LOGLVL_WARN, format, 3, &val1, &val2, &val3);
 }
 inline void Logger::warn(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4)
 {
-    logMgr->doLog(name, LogLevel::LOG_WARN, format, 4, &val1, &val2, &val3, &val4);
+    logMgr->doLog(name, LogLevel::LOGLVL_WARN, format, 4, &val1, &val2, &val3, &val4);
+}
+inline void Logger::warn(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4, const LogValue &val5)
+{
+    logMgr->doLog(name, LogLevel::LOGLVL_WARN, format, 5, &val1, &val2, &val3, &val4, &val5);
+}
+inline void Logger::warn(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4, const LogValue &val5, const LogValue &val6)
+{
+    logMgr->doLog(name, LogLevel::LOGLVL_WARN, format, 6, &val1, &val2, &val3, &val4, &val5, &val6);
 }
 
 
 inline void Logger::error(const char *format)
 {
-    logMgr->doLog(name, LogLevel::LOG_ERROR, format, 0);
+    logMgr->doLog(name, LogLevel::LOGLVL_ERROR, format, 0);
 }
 inline void Logger::error(const char *format, const LogValue &val1)
 {
-    logMgr->doLog(name, LogLevel::LOG_ERROR, format, 1, &val1);
+    logMgr->doLog(name, LogLevel::LOGLVL_ERROR, format, 1, &val1);
 }
 inline void Logger::error(const char *format, const LogValue &val1, const LogValue &val2)
 {
-    logMgr->doLog(name, LogLevel::LOG_ERROR, format, 2, &val1, &val2);
+    logMgr->doLog(name, LogLevel::LOGLVL_ERROR, format, 2, &val1, &val2);
 }
 inline void Logger::error(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3)
 {
-    logMgr->doLog(name, LogLevel::LOG_ERROR, format, 3, &val1, &val2, &val3);
+    logMgr->doLog(name, LogLevel::LOGLVL_ERROR, format, 3, &val1, &val2, &val3);
 }
 inline void Logger::error(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4)
 {
-    logMgr->doLog(name, LogLevel::LOG_ERROR, format, 4, &val1, &val2, &val3, &val4);
+    logMgr->doLog(name, LogLevel::LOGLVL_ERROR, format, 4, &val1, &val2, &val3, &val4);
+}
+inline void Logger::error(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4, const LogValue &val5)
+{
+    logMgr->doLog(name, LogLevel::LOGLVL_ERROR, format, 5, &val1, &val2, &val3, &val4, &val5);
+}
+inline void Logger::error(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4, const LogValue &val5, const LogValue &val6)
+{
+    logMgr->doLog(name, LogLevel::LOGLVL_ERROR, format, 6, &val1, &val2, &val3, &val4, &val5, &val6);
 }
 
 
 inline void Logger::fatal(const char *format)
 {
-    logMgr->doLog(name, LogLevel::LOG_FATAL, format, 0);
+    logMgr->doLog(name, LogLevel::LOGLVL_FATAL, format, 0);
 }
 inline void Logger::fatal(const char *format, const LogValue &val1)
 {
-    logMgr->doLog(name, LogLevel::LOG_FATAL, format, 1, &val1);
+    logMgr->doLog(name, LogLevel::LOGLVL_FATAL, format, 1, &val1);
 }
 inline void Logger::fatal(const char *format, const LogValue &val1, const LogValue &val2)
 {
-    logMgr->doLog(name, LogLevel::LOG_FATAL, format, 2, &val1, &val2);
+    logMgr->doLog(name, LogLevel::LOGLVL_FATAL, format, 2, &val1, &val2);
 }
 inline void Logger::fatal(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3)
 {
-    logMgr->doLog(name, LogLevel::LOG_FATAL, format, 3, &val1, &val2, &val3);
+    logMgr->doLog(name, LogLevel::LOGLVL_FATAL, format, 3, &val1, &val2, &val3);
 }
 inline void Logger::fatal(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4)
 {
-    logMgr->doLog(name, LogLevel::LOG_FATAL, format, 4, &val1, &val2, &val3, &val4);
+    logMgr->doLog(name, LogLevel::LOGLVL_FATAL, format, 4, &val1, &val2, &val3, &val4);
+}
+inline void Logger::fatal(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4, const LogValue &val5)
+{
+    logMgr->doLog(name, LogLevel::LOGLVL_FATAL, format, 5, &val1, &val2, &val3, &val4, &val5);
+}
+inline void Logger::fatal(const char *format, const LogValue &val1, const LogValue &val2, const LogValue &val3, const LogValue &val4, const LogValue &val5, const LogValue &val6)
+{
+    logMgr->doLog(name, LogLevel::LOGLVL_FATAL, format, 6, &val1, &val2, &val3, &val4, &val5, &val6);
 }
 
 /////////////////////////////

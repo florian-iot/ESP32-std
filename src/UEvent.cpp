@@ -132,6 +132,9 @@ const char *UEventLoop::getEventName(uint32_t eventType)
     return (t == 0 ? nullptr : eventNames[t].eventName);
 }
 
+/**
+ * Not necessarily called, one can also call runOnce() once in a while
+ */
 void UEventLoop::run()
 {
     if (queue == nullptr) {
@@ -145,6 +148,7 @@ void UEventLoop::run()
 
 boolean UEventLoop::runOnce(long waitTicks)
 {
+    loopTask = xTaskGetCurrentTaskHandle();
 #ifdef USE_EVENT_CHECK_HEAP
     if (!heap_caps_check_integrity_all(true)) {
         Serial.printf("Heap integrity failure at the beginning of event loop \"%s\"", loopName);
@@ -179,7 +183,7 @@ boolean UEventLoop::runOnce(long waitTicks)
         if (count >= 10) {
             break;
         }
-        didReceive = xQueueReceive(queue, &eventEntry.event, w);
+        didReceive = xQueueReceive(queue, &eventEntry.event, 5); // don't wait for "w" ticks, as this is busy wait (apparently)
         if (didReceive != pdPASS) {
             break;
         }
@@ -190,6 +194,7 @@ boolean UEventLoop::runOnce(long waitTicks)
             w = 0;
         }
         ++count;
+
 #ifdef USE_EVENT_CHECK_HEAP
         if (!heap_caps_check_integrity_all(true)) {
             Serial.printf("Heap integrity failure after processing event %s:%s in event loop \"%s\"",
@@ -200,7 +205,9 @@ boolean UEventLoop::runOnce(long waitTicks)
 #endif
     } while (true);
 
-    if (!didExecutions && count == 0) { // if we did nothing, or if too long without a yield, do a yield, so that lower priority tasks run
+    if (w > 0) { // we're left some time, just delay 1 millis (we're not consuming all the time)
+        delay(1);
+    } else if (!didExecutions && count == 0) { // if we did nothing, or if too long without a yield, do a yield, so that lower priority tasks run
         taskYIELD();
     }
 
@@ -222,10 +229,11 @@ bool UEventLoop::ProcessorEntry::matchesType(uint32_t inEventType)
 }
 
 void UEventLoop::handleEvent(UEventEntry *eventEntry) {
-    // Serial.printf("Processing event of type %s:%s\n",
+    // Serial.printf("UEventLoop Processing event of type %s:%s\n",
     //     getEventClass(eventEntry->event.eventType),
     //     getEventName(eventEntry->event.eventType)
     // );
+    // Serial.printf("In UEventLoop::handleEvent() Heap %d, free %d\n", ESP.getHeapSize(), ESP.getFreeHeap());
 
     mon.enter();
     {
@@ -287,11 +295,12 @@ void UEventLoop::unregister(UEventHandle_t eventHandler)
 
 bool UEventLoop::processEvent(UEvent event)
 {
-    Serial.printf("Processing event of type [%d:%d] %s:%s\n",
-        event.eventType >> 16, event.eventType & 0xFFFF,
-        getEventClass(event.eventType),
-        getEventName(event.eventType)
-    );
+    // Serial.printf("Processing event of type [%d:%d] %s:%s\n",
+    //     event.eventType >> 16, event.eventType & 0xFFFF,
+    //     getEventClass(event.eventType),
+    //     getEventName(event.eventType)
+    // );
+    // Serial.printf("In UEventLoop::processEvent() Heap %d, free %d\n", ESP.getHeapSize(), ESP.getFreeHeap());
 
     UEventEntry eventEntry;
     eventEntry.event = event;
@@ -302,12 +311,12 @@ bool UEventLoop::processEvent(UEvent event)
     return eventEntry.isProcessed;
 }
 
-bool UEventLoop::queueEvent(UEvent &event, std::function<void(UEvent*)> finalizer, SemaphoreHandle_t sem)
+bool UEventLoop::queueEvent(const UEvent &event, std::function<void(UEvent*)> finalizer, SemaphoreHandle_t sem)
 {
     return queueEvent(event, finalizer, nullptr, sem);
 }
 
-bool UEventLoop::queueEvent(UEvent &event, std::function<void(UEvent*)> finalizer,
+bool UEventLoop::queueEvent(const UEvent &event, std::function<void(UEvent*)> finalizer,
         std::function<void(UEvent *event, bool isProcessed)> onProcess, SemaphoreHandle_t sem)
 {
     if (queue == nullptr) {
@@ -334,7 +343,7 @@ bool UEventLoop::queueEvent(UEvent &event, std::function<void(UEvent*)> finalize
            xSemaphoreGive(sem);
         }
         if (finalizer) {
-            finalizer(&event);
+            finalizer(&eventEntry.event);
         }
         return false;
     } else {
@@ -342,9 +351,38 @@ bool UEventLoop::queueEvent(UEvent &event, std::function<void(UEvent*)> finalize
     }
 }
 
+void UEventLoop::initIsrData(UEventLoop::IsrData *isrData) {
+    isrData->queueHandle = this->queue;
+}
+
+bool UEventLoop::IsrData::queueEventFromIsr(UEvent &event)
+{
+    if (queueHandle == nullptr) {
+        return false;
+    }
+
+    UEventEntry eventEntry;
+    eventEntry.event = event;
+    eventEntry.sem = nullptr;
+    eventEntry.onProcess = nullptr;
+    eventEntry.finalizer = nullptr;
+
+    BaseType_t higherPriorityTaskWoken = pdFALSE;
+    BaseType_t didSent = xQueueSendToFrontFromISR(queueHandle, &eventEntry, &higherPriorityTaskWoken);
+    if (higherPriorityTaskWoken) {
+        portYIELD_FROM_ISR();
+    }
+    return (didSent == pdTRUE);
+}
+
 void UEventLoop::registerTimer(UEventLoopTimer *timer)
 {
     timer->init(this, nullptr);
+}
+
+void UEventLoop::registerTimer(UEventLoopTimer *timer, std::function<void(UEventLoopTimer*)> callback)
+{
+    timer->init(this, callback);
 }
 
 
@@ -473,7 +511,7 @@ UEventLoopTimer::~UEventLoopTimer()
 void UEventLoopTimer::init(UEventLoop *eventLoop, std::function<void(UEventLoopTimer *)> callback)
 {
     if (this->eventLoop != nullptr) {
-        Serial.println("On UEventLoopTimer::init(), eventLoop has already been initialized");
+        Serial.println("On UEventLoopTimer::init(), timer has already been initialized with a different eventLoop");
         abort();
     }
     this->eventLoop = eventLoop;
@@ -496,14 +534,14 @@ void UEventLoopTimer::setCallback(std::function<void(UEventLoopTimer *)> callbac
 void UEventLoopTimer::setInterval(std::function<void(UEventLoopTimer *)> callback, long intervalMillis)
 {
     this->callback = callback;
-    schedulerTask.set(intervalMillis * 1000, -1, scheduledCallback);
     schedulerTask.enableIfNot();
+    schedulerTask.set(intervalMillis * 1000, -1, scheduledCallback);
 }
 
 void UEventLoopTimer::setInterval(long intervalMillis)
 {
-    schedulerTask.set(intervalMillis * 1000, -1, scheduledCallback);
     schedulerTask.enableIfNot();
+    schedulerTask.set(intervalMillis * 1000, -1, scheduledCallback);
 }
 
 void UEventLoopTimer::setIntervalMicros(std::function<void(UEventLoopTimer *)> callback, long intervalMicros)
@@ -515,8 +553,8 @@ void UEventLoopTimer::setIntervalMicros(std::function<void(UEventLoopTimer *)> c
 
 void UEventLoopTimer::setIntervalMicros(long intervalMicros)
 {
-    schedulerTask.set(intervalMicros, -1, scheduledCallback);
     schedulerTask.enableIfNot();
+    schedulerTask.set(intervalMicros, -1, scheduledCallback);
 }
 
 void UEventLoopTimer::cancelInterval()
@@ -527,32 +565,46 @@ void UEventLoopTimer::cancelInterval()
 void UEventLoopTimer::setTimeout(std::function<void(UEventLoopTimer *)> callback, long intervalMillis)
 {
     this->callback = callback;
-    schedulerTask.set(intervalMillis * 1000, 1, scheduledCallback);
     schedulerTask.enableIfNot();
+    schedulerTask.set(intervalMillis * 1000, 1, scheduledCallback);
 }
 
 void UEventLoopTimer::setTimeout(long intervalMillis)
 {
-    schedulerTask.set(intervalMillis * 1000, 1, scheduledCallback);
     schedulerTask.enableIfNot();
+    schedulerTask.set(intervalMillis * 1000, 1, scheduledCallback);
 }
 
 void UEventLoopTimer::setTimeoutMicros(std::function<void(UEventLoopTimer *)> callback, long intervalMicros)
 {
     this->callback = callback;
-    schedulerTask.set(intervalMicros, 1, scheduledCallback);
     schedulerTask.enableIfNot();
+    schedulerTask.set(intervalMicros, 1, scheduledCallback);
 }
 
 void UEventLoopTimer::setTimeoutMicros(long intervalMicros)
 {
-    schedulerTask.set(intervalMicros, 1, scheduledCallback);
     schedulerTask.enableIfNot();
+    schedulerTask.set(intervalMicros, 1, scheduledCallback);
 }
 
 void UEventLoopTimer::cancelTimeout()
 {
     schedulerTask.disable();
+}
+
+long UEventLoopTimer::getTimeout()
+{
+    long t = schedulerTask.getInterval();
+    if (t <= 0) {
+        return t;
+    }
+    return (t < 1000 ? 1 : t / 1000); // if < 1000us, return always 1ms, not 0
+}
+
+long UEventLoopTimer::getTimeoutMicros()
+{
+    return schedulerTask.getInterval();
 }
 
 bool UEventLoopTimer::isActive()
@@ -569,4 +621,5 @@ void UEventLoopTimer::unregister()
 {
     schedulerTask.disable();
     eventLoop->scheduler.deleteTask(schedulerTask);
+    this->eventLoop = nullptr; // so we can initialize again
 }

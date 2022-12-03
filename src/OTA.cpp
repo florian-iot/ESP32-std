@@ -60,14 +60,35 @@ OTA::OTA()
 {
 }
 
+int OTA::onStart(std::function<bool()> fn)
+{
+  return otaStartCallbacks.add(fn);
+}
+
+void OTA::removeOnStart(int handle)
+{
+  otaStartCallbacks.remove(handle);
+}
+
+int OTA::onEnd(std::function<void(bool success)> fn)
+{
+  return otaEndCallbacks.add(fn);
+}
+
+void OTA::removeOnEnd(int handle)
+{
+  otaEndCallbacks.remove(handle);
+}
+
+
 void OTA::init(AsyncWebServer *server, LogMgr *logMgr, bool (*onUpdateStart)(), void (*onUpdateEnd)(bool succeeded))
 {
   Serial.printf("Initializing OTA, upload form: GET /update, post file for update: POST /update\n");
   _server = server;
   this->logMgr = logMgr;
   this->logger = logMgr->newLogger("OTA");
-  _onUpdateStart = onUpdateStart;
-  _onUpdateEnd = onUpdateEnd;
+  onStart(onUpdateStart);
+  onEnd(onUpdateEnd);
 
   server->serveStatic("/jquery.3.3.1.min.js", SPIFFS, "/jquery-3.3.1.min.js.gz", "max-age=30758400");
   server->on("/update", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -77,7 +98,9 @@ void OTA::init(AsyncWebServer *server, LogMgr *logMgr, bool (*onUpdateStart)(), 
   server->on("/update", HTTP_POST,
     [this](AsyncWebServerRequest *request) {
       logger->error("End of update, hasUpdateError: {}", _hasUpdateError);
-      _onUpdateEnd(_updateSucceeded);
+      for (int i = 0; i < otaEndCallbacks.size(); i++) {
+        otaEndCallbacks.get(i)(_updateSucceeded);
+      }
       _uploadingRequest = nullptr;
     },
     [this](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final) {
@@ -100,7 +123,12 @@ void OTA::init(AsyncWebServer *server, LogMgr *logMgr, bool (*onUpdateStart)(), 
                 filename.c_str(),
                 request->contentLength(), ESP.getFreeSketchSpace());
 
-        bool mayUpdate = _onUpdateStart();
+        bool mayUpdate = true;
+
+        for (int i = 0; mayUpdate && i < otaStartCallbacks.size(); i++) {
+          mayUpdate = otaStartCallbacks.get(i)();
+        }
+
         if (!mayUpdate) {
           updateError(request, "Update prohibited");
           return;
@@ -140,6 +168,7 @@ void OTA::init(AsyncWebServer *server, LogMgr *logMgr, bool (*onUpdateStart)(), 
             response->addHeader("Connection", "close");
             request->send(response);
             _updateSucceeded = true;
+
           } else {
             updateError(request, "Error ending update");
             return;
@@ -176,7 +205,7 @@ void OTA::updateError(AsyncWebServerRequest *request, PGM_P msg...)
   str += "\n";
 
   Serial.printf(str.c_str());
-  logger->error("{}", LogValue(str.c_str(), LogValue::StrAction::DO_COPY));
+  logger->error("{}", str.c_str());
 
   Update.abort();
   _hasUpdateError = true;

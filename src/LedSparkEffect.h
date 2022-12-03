@@ -91,10 +91,10 @@ private:
     void setCmd(ServiceCommands *cmd, const char *commandStr, const char *help, int *data, int min, int max);
 
 public:
-    EffectSparks(int controllerId, CRGB *leds, int totalLedCount, int defaultLedStart, int defaultLedCount, const char *description);
+    EffectSparks(int controllerId, LedMap1d *leds, int totalLedCount, int defaultLedStart, int defaultLedCount, const char *description);
     virtual ~EffectSparks();
     virtual void init(int millisPerFrame, CommandMgr *commandMgr, uint32_t frame);
-    virtual void onAfterLoad(int millisPerFrame);
+    virtual void onAfterLoad();
     virtual void getOneLineStatus(String *msg);
     virtual void setFrameDuration(int millis);
     virtual void calc(uint32_t frame);

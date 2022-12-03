@@ -9,19 +9,31 @@
 #include "UEvent.h"
 #include "Random.h"
 #include "CommandMgr.h"
+#include "LogMgr.h"
+
+#define LED_HARDWARE_COUNT 8
+
+class LedMap1d {
+friend class LedService;
+    CRGB *leds;
+    uint16_t *map;
+public:
+    CRGB *at(int pos) { return &leds[map[pos]]; }
+    CRGB *atWithoutMapping(int pos) { return &leds[pos]; }
+};
 
 class Effect {
 protected:
     int controllerId;
-    CRGB *leds;
+    LedMap1d *leds;
     int totalLedCount;
     String description;
 public:
-    Effect(int controllerId, CRGB *leds, int totalLedCount, const char *description);
+    Effect(int controllerId, LedMap1d *ledMap1d, int totalLedCount, const char *description);
     virtual ~Effect();
     virtual void init(int millisPerFrame, CommandMgr *commandMgr, uint32_t frame) = 0;
     virtual void setFrameDuration(int millisPerFrame) = 0;
-    virtual void onAfterLoad(int millisPerFrame) = 0;
+    virtual void onAfterLoad() = 0;
     virtual void getOneLineStatus(String *msg) = 0;
     virtual void calc(uint32_t frame) = 0;
     virtual void printStats() = 0;
@@ -33,8 +45,9 @@ private:
     UEventLoop *eventLoop;
     ServiceCommands *cmd;
     UEventLoopTimer timer;
+    Logger *logger;
 
-    static const int LED_HARDWARE_COUNT = 8;
+    int totalLedCount;
     struct Hardware {
         bool isConfigured;
         String ledChip;
@@ -43,8 +56,8 @@ private:
         int count;
     };
     Hardware hardware[LED_HARDWARE_COUNT];
+    LedMap1d map1d;
 
-    int totalLedCount;
     CRGB *leds; // array of leds, of size totalLedCount, mapped sequentially to hardware
 
     int powerLimit;
@@ -68,8 +81,9 @@ private:
     void runOnce();
 
     bool loadHardwareAndControllers(UEventLoop *eventLoop, CommandMgr *commandMgr);
+    void showMap(String *msg);
 public:
-    void init(UEventLoop *eventLoop, CommandMgr *commandMgr);
+    void init(UEventLoop *eventLoop, CommandMgr *commandMgr, LogMgr *logMgr);
 };
 
 

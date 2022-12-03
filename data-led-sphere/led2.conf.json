@@ -1,0 +1,26 @@
+{
+  "default": {
+    "isEnabled": false,
+    "ledStart": 0,
+    "ledCount": 194,
+    "valMin": 0,
+    "valMax": 255,
+    "valIdle": 0,
+    "hue1": 0,
+    "hue2": 70,
+    "saturation1": 0,
+    "saturation2": 0,
+    "hue1HighDelta": 30,
+    "hue2HighDelta": 236,
+    "hueJitter": 30,
+    "hue1Hue2Pct": 0,
+    "hueXScale": 256,
+    "hueTScale": 256,
+    "sparkDensityPct": 1,
+    "sparkDurationMillis": 60,
+    "sparkAttackTimePct": 1,
+    "sparkDecayTimePct": 1,
+    "sparkGamma": 200
+  },
+  "defaultKey": "default"
+}

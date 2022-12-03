@@ -1,0 +1,13 @@
+{
+  "default": {
+    "enable": true,
+    "loggingInterval": 1000,
+    "ch1R": 100,
+    "ch2R": 10,
+    "ch3R": 100,
+    "ch1Enabled": false,
+    "ch2Enabled": true,
+    "ch3Enabled": true
+  },
+  "defaultKey": "default"
+}

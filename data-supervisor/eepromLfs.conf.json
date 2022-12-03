@@ -1,0 +1,8 @@
+{
+  "default": {
+    "enable": true,
+    "i2cPort": 0,
+    "i2cAddr": 80
+  },
+  "defaultKey": "default"
+}

@@ -1,0 +1,9 @@
+{
+  "default": {
+    "isEnabled": true,
+    "brightness": 64,
+    "powerLimit": 800,
+    "freq": 30
+  },
+  "defaultKey": "default"
+}

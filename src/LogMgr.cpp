@@ -14,7 +14,6 @@ void LogValue::formatInto(String *str)
             if (format != nullptr) {
                 char v[20];
                 snprintf(v, sizeof(v), format, val.boolVal);
-                v[sizeof(v) - 1] = '\0';
                 str->concat(v);
             } else {
                 str->concat(this->val.boolVal ? "Y" : "N");
@@ -26,7 +25,6 @@ void LogValue::formatInto(String *str)
             } else {
                 char v[20];
                 snprintf(v, sizeof(v), format, val.int64Val);
-                v[sizeof(v) - 1] = '\0';
                 str->concat(v);
             }
             break;
@@ -36,7 +34,6 @@ void LogValue::formatInto(String *str)
             } else {
                 char v[20];
                 snprintf(v, sizeof(v), format, val.int64Val);
-                v[sizeof(v) - 1] = '\0';
                 str->concat(v);
             }
             break;
@@ -46,7 +43,6 @@ void LogValue::formatInto(String *str)
             } else {
                 char v[20];
                 snprintf(v, sizeof(v), format, val.floatVal);
-                v[sizeof(v) - 1] = '\0';
                 str->concat(v);
             }
             break;
@@ -56,11 +52,9 @@ void LogValue::formatInto(String *str)
             } else {
                 char v[20];
                 snprintf(v, sizeof(v), format, val.doubleVal);
-                v[sizeof(v) - 1] = '\0';
                 str->concat(v);
             }
             break;
-        case CSTR:
         case STR:
             {
                 const char *s = (val.cstrVal == nullptr ? "<NULL>" : val.cstrVal);
@@ -70,7 +64,6 @@ void LogValue::formatInto(String *str)
                     int n = strlen(s);
                     char v[20 + n];
                     snprintf(v, sizeof(v), format, s);
-                    v[n - 1] = '\0';
                     str->concat(v);
                 }
             }
@@ -102,7 +95,8 @@ LogMgr::LogMgr()
     values.capacity(1024);
     nextRecordPos = 1; // we're not using pos 0 at all, we're starting from 1. Can't use -1 for oldestRecordPosToFlush.
     oldestRecordPosToFlush = 0;
-    globalLogLevel = LogLevel::LOG_INFO;
+    globalLogLevel = LogLevel::LOGLVL_INFO;
+    isSerialImmediate = false;
 }
 
 void LogMgr::init()
@@ -222,6 +216,17 @@ void LogMgr::doLog(const char *name, LogLevel level, const char *format, int val
     ++nextRecordPos;
 // Serial.printf("Leaving doLog(), records: %d .. %d, values: %d .. %d\n",
 //         records.tailIdx(), records.headIdx(), values.tailIdx(), values.headIdx());
+
+    if (isSerialImmediate) {
+        String str;
+        const LogValue* v[8];
+        v[0] = val1; v[1] = val2; v[2] = val3; v[3] = val4;
+        v[4] = val5; v[5] = val6; v[6] = val7; v[7] = val8;
+
+        this->format(&str, format, valCount, const_cast<LogValue**>(v));
+        Serial.printf("LOGGING: %s %lu %s %s\n", name, millis(), levelName(level), str.c_str());
+    }
+
     monitor.leave();
 }
 
@@ -241,7 +246,7 @@ uint64_t LogMgr::getLastRecordIdx()
     return idx;
 }
 
-bool LogMgr::getRecord(uint64_t idx, String *name, LogLevel *level, String *str)
+bool LogMgr::getRecord(uint64_t idx, String *name, uint32_t *timestamp, LogLevel *level, String *str)
 {
     LogRecord rec;
     const int valMaxCount = 8;
@@ -281,10 +286,12 @@ bool LogMgr::getRecord(uint64_t idx, String *name, LogLevel *level, String *str)
         str->concat(", headRelativeIdx = "); str->concat((unsigned long)headRelativeIdx);
         str->concat(", records.size() = "); str->concat(records.size());
         *name = "";
-        *level = LogLevel::LOG_FATAL;
+        *timestamp = 0;
+        *level = LogLevel::LOGLVL_FATAL;
     } else {
         format(str, rec.format, rec.valueCount < valMaxCount ? rec.valueCount : valMaxCount, val);
         *name = rec.name;
+        *timestamp = rec.timestamp;
         *level = rec.level;
     }
 
@@ -343,7 +350,7 @@ LogMgr::FlusherHandle LogMgr::addFlusher(FlushFunction flushFunction)
             break;
         }
     }
-    if (idx != -1) {
+    if (idx == -1) {
         flushers.push_back(FlusherEntry());
         idx = flushers.size() - 1;
     }
@@ -380,6 +387,9 @@ void LogMgr::callFlushers()
         MonitorScope msf(&flusherListMonitor);
 
         for (auto i = flushers.begin(); i != flushers.end(); i++) {
+            if (!i->isOccupied) {
+                continue;
+            }
             i->recordPosToFlush = i->flusher(this, i->recordPosToFlush, lastHeadPos - i->recordPosToFlush);
             oldestRecordPosToFlush = (i->recordPosToFlush < oldestRecordPosToFlush ? i->recordPosToFlush : oldestRecordPosToFlush);
         }
@@ -409,7 +419,6 @@ int LogMgr::getRecordsCapacity()
     return records.capacity();
 }
 
-
 void LogMgr::clear()
 {
     // must clear before, otherwise records' indexes into values will be wrong
@@ -423,17 +432,22 @@ void LogMgr::clear()
     values.clear();
 }
 
+void LogMgr::setSerialImmediate(bool enable)
+{
+    isSerialImmediate = enable;
+}
+
 const char *LogMgr::levelName(LogLevel level)
 {
     switch (level) {
-    case LOG_OFF: return "OFF";
-    case LOG_FATAL: return "FATAL";
-    case LOG_ERROR: return "ERROR";
-    case LOG_WARN: return "WARN";
-    case LOG_INFO: return "INFO";
-    case LOG_DEBUG: return "DEBUG";
-    case LOG_TRACE: return "TRACE";
-    case LOG_ALL: return "ALL";
+    case LOGLVL_OFF: return "OFF";
+    case LOGLVL_FATAL: return "FATAL";
+    case LOGLVL_ERROR: return "ERROR";
+    case LOGLVL_WARN: return "WARN";
+    case LOGLVL_INFO: return "INFO";
+    case LOGLVL_DEBUG: return "DEBUG";
+    case LOGLVL_TRACE: return "TRACE";
+    case LOGLVL_ALL: return "ALL";
     default: return "";
     }
 };
@@ -452,11 +466,12 @@ LogService::LogService()
 void LogService::checkRecord(uint64_t idx, const char *msgToCompare)
 {
     String name;
+    uint32_t timestamp;
     LogLevel level;
     String str;
 Serial.printf("Checking record %" PRIu64 ", current records from %" PRIu64 " to %" PRIu64 "\n",
         idx, logMgr->getFirstRecordIdx(), logMgr->getLastRecordIdx());
-    bool ok = logMgr->getRecord(idx, &name, &level, &str);
+    bool ok = logMgr->getRecord(idx, &name, &timestamp, &level, &str);
     if (ok) {
         Serial.printf("Got record [%" PRIu64 "] %s, level %d: %s\n", idx, name.c_str(), level, str.c_str());
         if (msgToCompare != nullptr && strcmp(msgToCompare, str.c_str()) != 0) {
@@ -467,10 +482,10 @@ Serial.printf("Checking record %" PRIu64 ", current records from %" PRIu64 " to 
     }
 
 Serial.printf("Getting first record %" PRIu64 "\n", logMgr->getFirstRecordIdx());
-logMgr->getRecord(logMgr->getLastRecordIdx(), &name, &level, &str);
+logMgr->getRecord(logMgr->getLastRecordIdx(), &name, &timestamp, &level, &str);
 Serial.printf("Got first record %" PRIu64 "\n", logMgr->getFirstRecordIdx());
 Serial.printf("Getting last record %" PRIu64 "\n", logMgr->getLastRecordIdx());
-logMgr->getRecord(logMgr->getFirstRecordIdx(), &name, &level, &str);
+logMgr->getRecord(logMgr->getFirstRecordIdx(), &name, &timestamp, &level, &str);
 Serial.printf("Got last record %" PRIu64 "\n", logMgr->getLastRecordIdx());
 
     Serial.flush();
@@ -500,7 +515,11 @@ void LogService::init(LogMgr *logMgr, UEventLoop *eventLoop, CommandMgr *command
     this->eventLoop = eventLoop;
     this->commandMgr = commandMgr;
     this->logger = logMgr->newLogger("LogService");
+    eventLoop->registerTimer(&logFlusherTimer);
     eventLoop->registerTimer(&testTimer);
+
+    syslogServer = "";
+    syslogPort = 514;
 
     ServiceCommands *cmd = commandMgr->getServiceCommands("logger");
 
@@ -529,28 +548,39 @@ void LogService::init(LogMgr *logMgr, UEventLoop *eventLoop, CommandMgr *command
         })
     );
 
+    cmd->registerBoolData(
+        ServiceCommands::BoolDataBuilder("serialImmediate", true)
+        .cmd("serialImmediate")
+        .help("--> If set, a log line is immediately printed into Serial.")
+        .isPersistent(false)
+        .setFn([this](bool val, bool isLoading, String *msg) {
+            this->logMgr->setSerialImmediate(val);
+            return true;
+        })
+    );
+
     cmd->registerStringData(
         ServiceCommands::StringDataBuilder("level", true)
         .cmd("level")
         .help("--> Logging level: OFF, FATAL, ERROR, WARN, INFO, DEBUG, TRACE, ALL")
         .setFn([this](const String &val, bool isLoading, String *msg) -> bool {
             LogLevel level;
-            if (strcmp(val.c_str(), "ALL") == 0) {
-                level = LogLevel::LOG_ALL;
-            } else if (strcmp(val.c_str(), "FATAL") == 0) {
-                level = LogLevel::LOG_FATAL;
-            } else if (strcmp(val.c_str(), "ERROR") == 0) {
-                level = LogLevel::LOG_ERROR;
-            } else if (strcmp(val.c_str(), "WARN") == 0) {
-                level = LogLevel::LOG_WARN;
-            } else if (strcmp(val.c_str(), "INFO") == 0) {
-                level = LogLevel::LOG_INFO;
-            } else if (strcmp(val.c_str(), "DEBUG") == 0) {
-                level = LogLevel::LOG_DEBUG;
-            } else if (strcmp(val.c_str(), "TRACE") == 0) {
-                level = LogLevel::LOG_TRACE;
-            } else if (strcmp(val.c_str(), "ALL") == 0) {
-                level = LogLevel::LOG_ALL;
+            if (strcasecmp(val.c_str(), "ALL") == 0) {
+                level = LogLevel::LOGLVL_ALL;
+            } else if (strcasecmp(val.c_str(), "FATAL") == 0) {
+                level = LogLevel::LOGLVL_FATAL;
+            } else if (strcasecmp(val.c_str(), "ERROR") == 0) {
+                level = LogLevel::LOGLVL_ERROR;
+            } else if (strcasecmp(val.c_str(), "WARN") == 0) {
+                level = LogLevel::LOGLVL_WARN;
+            } else if (strcasecmp(val.c_str(), "INFO") == 0) {
+                level = LogLevel::LOGLVL_INFO;
+            } else if (strcasecmp(val.c_str(), "DEBUG") == 0) {
+                level = LogLevel::LOGLVL_DEBUG;
+            } else if (strcasecmp(val.c_str(), "TRACE") == 0) {
+                level = LogLevel::LOGLVL_TRACE;
+            } else if (strcasecmp(val.c_str(), "ALL") == 0) {
+                level = LogLevel::LOGLVL_ALL;
             } else {
                 *msg = "Unrecognized level \"";
                 *msg += val;
@@ -572,7 +602,7 @@ void LogService::init(LogMgr *logMgr, UEventLoop *eventLoop, CommandMgr *command
         .isPersistent(false)
         .help("--> Send a line to the log")
         .setFn([this](const String &val, bool isLoading, String *msg) -> bool {
-            this->logger->info("logger", "{}", LogValue(val.c_str(), LogValue::DO_COPY));
+            this->logger->info("{}", val.c_str());
             *msg = "Sent to log: "; *msg += val;
             return true;
         })
@@ -594,42 +624,56 @@ void LogService::init(LogMgr *logMgr, UEventLoop *eventLoop, CommandMgr *command
         ServiceCommands::IntDataBuilder("last", true)
         .cmd("last")
         .isPersistent(false)
-        .help("--> list <n>: List last <n> log lines. Use -1 to list from the first available log line.")
+        .help("--> last <n>: List last <n> log lines. Use -1 to list from the first available log line.")
         .setFn([this](int val, bool isLoading, String *msg) -> bool {
-            uint64_t last = this->logMgr->getLastRecordIdx();
-            uint64_t first;
-            if (val <= 0) {
-                first = this->logMgr->getFirstRecordIdx();
-            } else {
-                first = last - val + 1;
-                uint64_t f = this->logMgr->getFirstRecordIdx();
-                if (first < f) {
-                    first = f;
-                }
-            }
-            *msg = "";
-            String str;
-            String name;
-            LogLevel level;
-            msg->concat("Log lines from " + String((int)first) + " to " + (int)last + "\n");
-            for (uint64_t i = first; i <= last; i++) {
-                str.clear();
-                bool ok = this->logMgr->getRecord(i, &name, &level, &str);
-                msg->concat((uint32_t)i);
-                if (ok) {
-                    msg->concat(": "); msg->concat(name); msg->concat(" ");
-                    msg->concat(this->logMgr->levelName(level)); msg->concat(" ");
-                    msg->concat(str);
-                    msg->concat("\n");
-                } else {
-                    msg->concat(": <nonexistent>\n");
-                }
-            }
-
+            getLast(val, msg, LogLevel::LOGLVL_ALL);
             return true;
         })
     );
 
+    cmd->registerIntData(
+        ServiceCommands::IntDataBuilder("lastErrors", true)
+        .cmd("lastErrors")
+        .isPersistent(false)
+        .help("--> lastError <n>: List last <n> log lines, show only lines in ERROR. Use -1 to list from the first available log line.")
+        .setFn([this](int val, bool isLoading, String *msg) -> bool {
+            getLast(val, msg, LogLevel::LOGLVL_ERROR);
+            return true;
+        })
+    );
+
+#ifdef LOGGING_USE_SYSLOG
+    cmd->registerStringData(
+        ServiceCommands::StringDataBuilder("syslogServer", true)
+        .cmd("syslogServer")
+        .help("--> Syslog server name or IP address, or \"off\" to turn off.")
+        .getFn([this](String *val) {
+            if (syslogServer.isEmpty()) {
+                *val = "off";
+            } else {
+                *val = syslogServer;
+            }
+        })
+        .setFn([this](const String &val, bool isLoading, String *msg) {
+            if (val == "off") {
+                syslogServer = "";
+                *msg = "syslogServer set to "; msg->concat(syslogServer);
+            } else {
+                syslogServer = val;
+                *msg = "syslogServer off";
+            }
+            return true;
+        })
+    );
+
+    cmd->registerIntData(
+        ServiceCommands::IntDataBuilder("syslogPort", true)
+        .cmd("syslogPort")
+        .help("--> Port of the syslog server. Requires save and reboot.")
+        .ptr(&syslogPort)
+    );
+
+#endif
 
 #ifdef LOGGING_ENABLE_TESTS
     cmd->registerStringData(
@@ -646,16 +690,16 @@ void LogService::init(LogMgr *logMgr, UEventLoop *eventLoop, CommandMgr *command
             isTesting = true;
 
             LogMgr *logMgr = this->logMgr;
-            logMgr->setGlobalLevel(LogLevel::LOG_ALL);
+            logMgr->setGlobalLevel(LogLevel::LOGLVL_ALL);
 
             Logger *logger = logMgr->newLogger("myLogger");
-            logger->setLevel(LogLevel::LOG_ALL);
+            logger->setLevel(LogLevel::LOGLVL_ALL);
 
             testStart("Test 0 - noop");
             testEnd();
 
             testStart("Test 1");
-            logger->error("A debug message: {}", LogValue(100));
+            logger->error("A debug message: {}", 100);
             Serial.printf("Message 1 sent, logMgr idx: [%d .. %d]\n",
                 (int)logMgr->getFirstRecordIdx(),
                 (int)logMgr->getLastRecordIdx());
@@ -676,34 +720,19 @@ void LogService::init(LogMgr *logMgr, UEventLoop *eventLoop, CommandMgr *command
             testEnd();
 
             testStart("Test 4");
-            logger->debug("A debug message: {}/{}", "abc", LogValue(String("def").c_str(), LogValue::StrAction::DO_COPY));
+            logger->debug("A debug message: {}/{}", "abc", String("def").c_str());
             checkRecord(logMgr->getLastRecordIdx(), "A debug message: abc/def");
             testEnd();
 
             testStart("Test 5");
-            logger->debug("A debug message: {}/{}", "abc", LogValue("ghi with copy", LogValue::StrAction::DO_COPY));
+            logger->debug("A debug message: {}/{}", "abc", "ghi with copy");
             checkRecord(logMgr->getLastRecordIdx() - 1, "A debug message: abc/def");
             checkRecord(logMgr->getLastRecordIdx(), "A debug message: abc/ghi with copy");
             testEnd();
 
-            testStart("Test 6");
-            logger->debug("A debug message: {}/{}", "abc", LogValue(strdup("jkl with free"), LogValue::StrAction::DO_FREE));
-            checkRecord(logMgr->getLastRecordIdx() - 2, "A debug message: abc/def");
-            checkRecord(logMgr->getLastRecordIdx() - 1, "A debug message: abc/ghi with copy");
-            checkRecord(logMgr->getLastRecordIdx(), "A debug message: abc/jkl with free");
-            testEnd();
-
-            testStart("Test 6bis");
-            logger->debug("A debug message: {}/{}", "abc", LogValue(strdup("jkl with free v2"), LogValue::StrAction::DO_FREE));
-            checkRecord(logMgr->getLastRecordIdx() - 3, "A debug message: abc/def");
-            checkRecord(logMgr->getLastRecordIdx() - 2, "A debug message: abc/ghi with copy");
-            checkRecord(logMgr->getLastRecordIdx() - 1, "A debug message: abc/jkl with free");
-            checkRecord(logMgr->getLastRecordIdx(), "A debug message: abc/jkl with free v2");
-            testEnd();
-
             testStart("Test 7");
             std::function<void (String *)> fn = [](String *str) -> void { str->concat("from function"); };
-            logger->debug("A message: {}", LogValue(fn));
+            logger->debug("A message: {}", fn);
             checkRecord(logMgr->getLastRecordIdx(), "A message: from function");
             testEnd();
 
@@ -833,7 +862,98 @@ void LogService::init(LogMgr *logMgr, UEventLoop *eventLoop, CommandMgr *command
         Serial.printf("Loaded config for %s/%s\n", cmd->getServiceName(), keyName.c_str());
     }
 
+#ifdef LOGGING_USE_SYSLOG
+    if (!syslogServer.isEmpty()) {
+        logMgr->addFlusher([this](LogMgr *logMgr, uint64_t flushFrom, int count) {
+            if (syslogServer.isEmpty() || syslogPort == 0) {
+                return flushFrom + count;
+            }
+
+            String name;
+            uint32_t timestamp;
+            LogLevel level;
+            String str;
+            for (uint64_t i = flushFrom; i < flushFrom + count; i++) {
+                bool found = logMgr->getRecord(i, &name, &timestamp, &level, &str);
+                if (found) {
+                    Serial.printf("LOG FLUSHER: [%" PRIu64 "] %d %s %s %s\n", i, timestamp, name.c_str(), logMgr->levelName(level), str.c_str());
+                }
+            }
+            return flushFrom + count;
+        });
+    }
+#endif
+
+    logFlusherTimer.setCallback([this](UEventLoopTimer *timer) {
+        this->logMgr->callFlushers();
+    });
+    logFlusherTimer.setInterval(50); // 20 times/second
 
 }
+
+void LogService::getLast(int val, String *msg, int maxLevel)
+{
+    uint64_t last = this->logMgr->getLastRecordIdx();
+    uint64_t first;
+    if (val <= 0) {
+        first = this->logMgr->getFirstRecordIdx();
+    } else {
+        first = last - val + 1;
+        uint64_t f = this->logMgr->getFirstRecordIdx();
+        if (first < f) {
+            first = f;
+        }
+    }
+    *msg = "";
+    String str;
+    String name;
+    LogLevel level;
+    uint32_t timestamp;
+    msg->concat("Log lines from " + String((int)first) + " to " + (int)last + "\n");
+    for (uint64_t i = first; i <= last; i++) {
+        str.clear();
+        bool ok = this->logMgr->getRecord(i, &name, &timestamp, &level, &str);
+        if (ok && level > maxLevel) {
+            continue;
+        }
+        msg->concat((uint32_t)i);
+        msg->concat(' ');
+        if (ok) {
+            if (timestamp > 1000 * 60 * 60) {
+                uint32_t h = timestamp / 3600000;
+                msg->concat(h);
+                msg->concat(':');
+                timestamp -= h * 3600000;
+            }
+            uint32_t m = timestamp / 60000;
+            if (m < 10) {
+                msg->concat('0');
+            }
+            msg->concat(m);
+            msg->concat(':');
+            timestamp -= m * 60000;
+            uint32_t s = timestamp / 1000;
+            if (s < 10) {
+                msg->concat('0');
+            }
+            msg->concat(s);
+            msg->concat('.');
+            timestamp -= s * 1000;
+            if (timestamp < 10) {
+                msg->concat("00");
+            } else if (timestamp < 100) {
+                msg->concat("0");
+            }
+            msg->concat(timestamp);
+            msg->concat(": "); msg->concat(name); msg->concat(" ");
+            msg->concat(this->logMgr->levelName(level)); msg->concat(" ");
+            msg->concat(str);
+            msg->concat("\n");
+        } else {
+            msg->concat(": <nonexistent>\n");
+        }
+    }
+}
+
 
 #endif

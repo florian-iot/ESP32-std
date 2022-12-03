@@ -1,0 +1,13 @@
+{
+  "default": {
+    "pin": 27,
+    "reversed": false,
+    "pull": "NONE",
+    "debounceMillis": 1000,
+    "dClickMillis": 300,
+    "tClickMillis": 300,
+    "longClickMillis": 3000,
+    "enable": true
+  },
+  "defaultKey": "default"
+}

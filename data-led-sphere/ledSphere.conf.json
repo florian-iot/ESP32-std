@@ -1,0 +1,13 @@
+{
+  "default": {
+    "voltageSensePin": 33,
+    "chargingSensePin": 34,
+    "voltageDividerEnumerator": 1980,
+    "voltageDividerDenominator": 1000,
+    "lowVoltage": 3400,
+    "batteryLowVoltageHyst": 400,
+    "usbPowerVoltage": 4300,
+    "usbPowerVoltageHyst": 100
+  },
+  "defaultKey": "default"
+}

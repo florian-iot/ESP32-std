@@ -4,26 +4,26 @@
 #ifndef INCL_LOGGING_H
 #define INCL_LOGGING_H
 
-#include <HardwareSerial.h>
-#include <SPIFFS.h>
-#include <ArduinoJson.h>
-#include "UEvent.h"
-#include "CommandMgr.h"
+// #include <HardwareSerial.h>
+// #include <SPIFFS.h>
+// #include <ArduinoJson.h>
+// #include "UEvent.h"
+// #include "CommandMgr.h"
 
-class LoggingService {
-public:
-  void init(UEventLoop *eventLoop, CommandMgr *commandMgr);
-private:
-  UEventLoop *eventLoop;
-  CommandMgr *commandMgr;
+// class LoggingService {
+// public:
+//   void init(UEventLoop *eventLoop, CommandMgr *commandMgr);
+// private:
+//   UEventLoop *eventLoop;
+//   CommandMgr *commandMgr;
 
-  UEventLoopTimer  writerTimer;
+//   UEventLoopTimer  writerTimer;
 
-  bool isEnabled;
-  String fileName;
+//   bool isEnabled;
+//   String fileName;
 
 
-};
+// };
 
 #endif
 #endif

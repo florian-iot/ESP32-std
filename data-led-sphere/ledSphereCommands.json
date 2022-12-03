@@ -1,0 +1,24 @@
+{
+    "startup": {
+        "enter": [ "led2 disable", "led0 load multicolor3" ],
+        "leave": [ ]
+    },
+    "click": [
+        [ "led2 disable", "led0 load multicolor2" ],
+        [ "led2 disable", "led0 load multicolor3" ],
+        [ "led2 enable", "led0 load noel" ],
+        [ "led2 disable", "led0 load smooth2" ],
+        [ "led2 disable", "led0 load smooth" ],
+        [ "led2 enable", "led0 load smooth" ],
+        [ "led2 enable", "led0 load multicolor2" ],
+        [ "led2 enable", "led0 load white2" ]
+    ],
+    "batteryLow": {
+        "enter": [ "led0 disable", "led2 disable", "led3 enable", "led3 hue1 0" ],
+        "leave": [ "led3 disable", "led0 enable" ]
+    },
+    "usbPower": {
+        "enter": [ "led0 disable", "led2 disable", "led3 enable", "led3 hue1 90" ],
+        "leave": [ "led3 disable", "led0 enable" ]
+    }
+}

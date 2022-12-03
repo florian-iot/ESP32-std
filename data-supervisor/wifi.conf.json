@@ -1,0 +1,10 @@
+{
+  "default": {
+    "autoStart": true,
+    "apOnly": false,
+    "apIp": "172.217.28.1",
+    "apPassword": "31415926",
+    "hostname": "esp32-supervisor-v1"
+  },
+  "defaultKey": "default"
+}

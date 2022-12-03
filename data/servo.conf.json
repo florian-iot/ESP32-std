@@ -1,0 +1,17 @@
+{
+  "default": {
+    "pin": 33,
+    "minPulseWidthMicros": 500,
+    "maxPulseWidthMicros": 2500,
+    "maxPosition": 1000,
+    "slack": 100,
+    "slackPositioningDurationMillis": 10000,
+    "autoIdle": 0,
+    "lcdBacklightLevel": 70,
+    "lcdAnimate": true,
+    "lcdFps": 30,
+    "lcdIsDma": false,
+    "lcdBgColor": 4
+  },
+  "defaultKey": "default"
+}

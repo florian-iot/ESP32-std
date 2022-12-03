@@ -5,18 +5,24 @@
 #include "UEvent.h"
 #include "Monitor.h"
 #include "CommandMgr.h"
+#include "SystemService.h"
+#include "RebootDetectorService.h"
+#include "LogMgr.h"
 
 class WebSocketsServer {
 public:
   WebSocketsServer();
   ~WebSocketsServer();
-  void init(AsyncWebServer *server, CommandMgr *commandMgr);
+  void init(AsyncWebServer *server, CommandMgr *commandMgr, SystemService *system, RebootDetectorService *rebootDetector, LogMgr *logMgr);
   void cleanupClients();
 
 private:
   AsyncWebSocket ws;
   // AsyncEventSource events;
   CommandMgr *commandMgr;
+  SystemService *system;
+  RebootDetectorService *rebootDetector;
+  Logger *logger;
 
   void processCommand(String cmdm, AsyncWebSocketClient *client);
 

@@ -158,6 +158,7 @@ private:
 
     int ledStart;
     int ledCount;
+    bool isMappingEnabled;
 
     Shape shape;
     ColorParams color;
@@ -188,11 +189,11 @@ private:
     void setCmd(ServiceCommands *cmd, const char *commandStr, const char *help, bool *data);
 
 public:
-    LedMeteorEffect(int controllerId, CRGB *leds, int totalLedCount, int defaultLedStart, int defaultLedCount, const char *description);
+    LedMeteorEffect(int controllerId, LedMap1d *leds, int totalLedCount, int defaultLedStart, int defaultLedCount, const char *description);
     virtual ~LedMeteorEffect();
     virtual void init(int millisPerFrame, CommandMgr *commandMgr, uint32_t frame);
     virtual void setFrameDuration(int millisPerFrame);
-    virtual void onAfterLoad(int millisPerFrame);
+    virtual void onAfterLoad();
     virtual void getOneLineStatus(String *msg);
     virtual void calc(uint32_t frame);
     virtual void printStats();

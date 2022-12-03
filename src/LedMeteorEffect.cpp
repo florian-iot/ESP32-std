@@ -87,11 +87,12 @@ float Shape::shapeAt(float x)
     }
 }
 
-LedMeteorEffect::LedMeteorEffect(int controllerId, CRGB *leds, int totalLedCount, int defaultLedStart, int defaultLedCount, const char *description)
+LedMeteorEffect::LedMeteorEffect(int controllerId, LedMap1d *leds, int totalLedCount, int defaultLedStart, int defaultLedCount, const char *description)
 : Effect(controllerId, leds, totalLedCount, description)
 {
     this->ledStart = defaultLedStart;
     this->ledCount = defaultLedCount;
+    isMappingEnabled = true;
 }
 
 LedMeteorEffect::~LedMeteorEffect()
@@ -269,6 +270,14 @@ void LedMeteorEffect::init(int millisPerFrame, CommandMgr *commandMgr, uint32_t 
                 return ledCount;
             })
     );
+
+    cmd->registerBoolData(
+        ServiceCommands::BoolDataBuilder("mapping", true)
+            .cmd("mapping")
+            .help("mapping on|off --> Enable or disable mapping given in hardware config")
+            .ptr(&isMappingEnabled)
+    );
+
     setCmd(cmd, "valMin", "--> Minimum brightness, 0..255", &shape.valMin, 0, 255);
     setCmd(cmd, "valMax", "--> Maximum brightness, 0..255", &shape.valMax, 0, 255);
 
@@ -337,9 +346,8 @@ void LedMeteorEffect::init(int millisPerFrame, CommandMgr *commandMgr, uint32_t 
     calcFrameProperties();
 }
 
-void LedMeteorEffect::onAfterLoad(int millisPerFrame)
+void LedMeteorEffect::onAfterLoad()
 {
-    this->millisPerFrame = millisPerFrame;
     calcFrameProperties();
 }
 
@@ -462,7 +470,11 @@ void LedMeteorEffect::calc(uint32_t frame)
                          + 0.5);
                 }
 
-                leds[ledStart + i].setHSV(hue, saturation, (int)(val + 0.5));
+                if (isMappingEnabled) {
+                    leds->at(ledStart + i)->setHSV(hue, saturation, (int)(val + 0.5));
+                } else {
+                    leds->atWithoutMapping(ledStart + i)->setHSV(hue, saturation, (int)(val + 0.5));
+                }
             }
         }
     }

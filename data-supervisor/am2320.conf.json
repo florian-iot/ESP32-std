@@ -1,0 +1,7 @@
+{
+  "default": {
+    "enable": true,
+    "i2cPort": 1
+  },
+  "defaultKey": "default"
+}

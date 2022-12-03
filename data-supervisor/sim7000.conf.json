@@ -1,0 +1,7 @@
+{
+  "default": {
+    "pinSleep": -1,
+    "pinPowerKey": -1
+  },
+  "defaultKey": "default"
+}

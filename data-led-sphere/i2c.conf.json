@@ -1,0 +1,11 @@
+{
+  "default": {
+    "sda0": 23,
+    "sda1": -1,
+    "scl0": 19,
+    "scl1": -1,
+    "freq0": 100000,
+    "freq1": 100000
+  },
+  "defaultKey": "default"
+}

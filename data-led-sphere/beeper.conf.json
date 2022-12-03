@@ -1,0 +1,8 @@
+{
+  "default": {
+    "pin": 25,
+    "inverted": false,
+    "enabled": true
+  },
+  "defaultKey": "default"
+}

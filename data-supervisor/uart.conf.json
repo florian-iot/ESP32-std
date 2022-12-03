@@ -1,0 +1,7 @@
+{
+  "default": {
+    "pinRx": 13,
+    "pinTx": 14
+  },
+  "defaultKey": "default"
+}

@@ -88,10 +88,14 @@ bool CommandMgr::getDoubleValue(UEvent *event, double *val) {
 bool CommandMgr::getBoolValue(UEvent *event, bool *val) {
     String *msg = reinterpret_cast<String *>(const_cast<void *>(event->dataPtr));
 
-    if (strcasecmp(msg->c_str(), "on") == 0 || strcasecmp(msg->c_str(), "1") == 0 || strcasecmp(msg->c_str(), "y") == 0 || strcasecmp(msg->c_str(), "yes") == 0) {
+    if (strcasecmp(msg->c_str(), "on") == 0 || strcasecmp(msg->c_str(), "1") == 0
+            || strcasecmp(msg->c_str(), "y") == 0 || strcasecmp(msg->c_str(), "yes") == 0
+            || strcasecmp(msg->c_str(), "true") == 0) {
         *val = true;
         return true;
-    } else if (strcasecmp(msg->c_str(), "off") == 0 || strcasecmp(msg->c_str(), "0") == 0 || strcasecmp(msg->c_str(), "n") == 0 || strcasecmp(msg->c_str(), "no") == 0) {
+    } else if (strcasecmp(msg->c_str(), "off") == 0 || strcasecmp(msg->c_str(), "0") == 0
+            || strcasecmp(msg->c_str(), "n") == 0 || strcasecmp(msg->c_str(), "no") == 0
+            || strcasecmp(msg->c_str(), "false") == 0) {
         *val = false;
         return true;
     } else {
@@ -118,6 +122,7 @@ bool CommandMgr::getStringValue(UEvent *event, String *val) {
 void CommandMgr::init(UEventLoop *eventLoop) {
     this->eventLoop = eventLoop;
     eventSem = xSemaphoreCreateBinary();
+    cmdInternalMenuList = eventLoop->getEventType("cmd:internal", "menuList");
     cmdInternalMenuInfo = eventLoop->getEventType("cmd:internal", "menuInfo");
 }
 
@@ -125,29 +130,51 @@ UEventLoop *CommandMgr::getEventLoop() {
     return eventLoop;
 }
 
-void CommandMgr::getMenuInfo(String &menuStr) {
+void CommandMgr::getMenuList(String &menuStr) {
+    DynamicJsonBuffer buf;
+    JsonArray &menu = buf.createArray();
+    for (auto service = serviceCommands.begin(); service != serviceCommands.end(); ++service) {
+        menu.add((*service)->serviceName);
+    }
+    menu.printTo(menuStr);
+}
+
+void CommandMgr::getMenuInfo(const char *menuName, String &menuStr) {
     DynamicJsonBuffer buf;
     JsonObject &menu = buf.createObject();
     for (auto service = serviceCommands.begin(); service != serviceCommands.end(); ++service) {
-        JsonObject &s = buf.createObject();
-        for (auto cmd = (*service)->commandEntries.begin(); cmd != (*service)->commandEntries.end(); ++cmd) {
-            (*cmd)->addMenuInfo(&s);
+        if (strcmp((*service)->getServiceName(), menuName) == 0) {
+            JsonObject &s = buf.createObject();
+            for (auto cmd = (*service)->commandEntries.begin(); cmd != (*service)->commandEntries.end(); ++cmd) {
+                (*cmd)->addMenuInfo(&s);
+            }
+            s["status"] = "Show the current status/configuration\n";
+            s["save"] = "save [config name]: Save the current config, optionally under a specified config name";
+            s["load"] = "load [config name]: Load the specified config, by default the one that was previously loaded, or \"default\" if none";
+            s["configs"] = "List the saved configs";
+            s["help"] = "List available commands and help";
+            menu[(*service)->getServiceName()] = s;
+            break;
         }
-        s["status"] = "Show the current status/configuration\n";
-        s["save"] = "save [config name]: Save the current config, optionally under a specified config name";
-        s["load"] = "load [config name]: Load the specified config, by default the one that was previously loaded, or \"default\" if none";
-        s["configs"] = "List the saved configs";
-        s["help"] = "List available commands and help";
-        menu[(*service)->serviceName] = s;
     }
-    menu.prettyPrintTo(menuStr);
+    menu.printTo(menuStr);
 }
 
+/**
+ * NOTE: Not reentrant - shouldn't be called while processing another command line.
+ */
 bool CommandMgr::processCommandLine(const char *channel, String *cmd) {
-    StringSplitter<128> splitter(cmd);
+    if (cmd->length() >= 1024) {
+        *cmd = "Command too long, maximum size 1024 bytes";
+        return false;
+    }
+    StringSplitter<1024> splitter(cmd);
     const char *commandClassStr = splitter.nextWord("cmd:");
     const char *commandStr = splitter.nextWord();
     const char *argsStr = splitter.rest();
+
+// Serial.printf("processCommandLine: cmd %s, command class %s, command %s, args \"%s\"\n", cmd->c_str(), commandClassStr, commandStr, argsStr);
+// Serial.printf("In CommandMgr::processCommandLine() Heap %d, free %d\n", ESP.getHeapSize(), ESP.getFreeHeap());
 
     int eventType = eventLoop->findEventType(commandClassStr, commandStr);
     if (eventType == 0) {
@@ -156,20 +183,25 @@ bool CommandMgr::processCommandLine(const char *channel, String *cmd) {
     }
 
     // handle internal commands
-    if (eventType == cmdInternalMenuInfo) {
-        *cmd = "@internal:";
-        getMenuInfo(*cmd);
+    if (eventType == cmdInternalMenuList) {
+        *cmd = "@internal:menuList:";
+        getMenuList(*cmd);
+        return true;
+    } else if (eventType == cmdInternalMenuInfo) {
+        *cmd = "@internal:menuInfo:";
+        getMenuInfo(argsStr, *cmd);
         return true;
     }
 
     *cmd = argsStr;
     bool isProcessed = false;
 
-    Serial.printf("CommandMgr received from [%s] command [%d:%d] \"%s\" \"%s\" \"%s\"\n",
-                  channel, eventType >> 16, eventType & 0xFFFF, commandClassStr, commandStr, cmd->c_str());
-    Serial.printf("Now will queue command event to event loop\n");
+    // Serial.printf("CommandMgr received from [%s] command [%d:%d] \"%s\" \"%s\" \"%s\"\n",
+    //               channel, eventType >> 16, eventType & 0xFFFF, commandClassStr, commandStr, cmd->c_str());
 
     mon.enter();  // serialize use of semaphore, in case many threads call this method
+// Serial.printf("CommandMgr entered monitor, event loop task: %p, current task: %p\n", eventLoop->getProcessingTask(), xTaskGetCurrentTaskHandle());
+
     // we're effectively serializing command execution, because we want to be notified
     // for each execution
     {
@@ -177,32 +209,40 @@ bool CommandMgr::processCommandLine(const char *channel, String *cmd) {
             // We're calling this method from the event loop's processing task, so we
             // cannot wait on a semaphore for the processing signal.
             // Go process the event directly
+// Serial.printf("CommandMgr processing event while in event loop's thread\n");
             isProcessed = eventLoop->processEvent(UEvent(eventType, cmd));
+// Serial.printf("CommandMgr done processing event\n");
         } else {
             // bool queueEvent(UEvent &event, std::function<void(UEvent*)> finalizer,
             //     std::function<void(UEvent *event, bool isProcessed)> onProcess = nullptr, SemaphoreHandle_t = nullptr);
+
+// Serial.printf("CommandMgr queuing event for processing  while in a thread different from event loop's thread\n");
 
             UEvent event(eventType, cmd);
             bool queued = eventLoop->queueEvent(
                 event,
                 [](UEvent *event) -> void {},
                 [&isProcessed](UEvent *event, bool inIsProcessed) {
-                    Serial.printf("Event leaving the queue, %s\n", inIsProcessed ? "processed" : "not processed");
+                    // Serial.printf("Event leaving the queue, %s\n", inIsProcessed ? "processed" : "not processed");
                     isProcessed = inIsProcessed;
                     return;
                 },
                 eventSem);
             if (!queued) {
-                Serial.printf("Event not queued\n");
+                // Serial.printf("Event not queued\n");
                 *cmd = "Error queueing the command";
                 isProcessed = false;
             }
 
+// Serial.printf("CommandMgr waiting on semaphore for event to be processed\n");
             xSemaphoreTake(eventSem, portMAX_DELAY);
+// Serial.printf("CommandMgr semaphore taken, event processed\n");
             // we'll have the result in cmd and isProcessed will have been set
         }
     }
     mon.leave();
+    // Serial.printf("CommandMgr returning from [%s] command [%d:%d] \"%s\" \"%s\" \"%s\"\n",
+    //               channel, eventType >> 16, eventType & 0xFFFF, commandClassStr, commandStr, cmd->c_str());
     return isProcessed;
 }
 
@@ -258,7 +298,7 @@ ServiceCommands::IntData::IntData(const String *name) : ParamData(ParamData::Typ
 }
 
 void ServiceCommands::IntData::addStatusInfo(String *msg) {
-    if (includeInStatus && (getFn != nullptr || ptr != nullptr)) {
+    if (getFn != nullptr || ptr != nullptr) {
         msg->concat("    ");
         msg->concat(name.get());
         msg->concat(": ");
@@ -274,6 +314,12 @@ void ServiceCommands::IntData::addStatusInfo(String *msg) {
             msg->concat(val);
         }
         msg->concat("\n");
+    }
+}
+
+void ServiceCommands::IntData::addMenuInfo(JsonObject *menuInfo) {
+    if (cmd.get() != nullptr && help.get() != nullptr) {
+        (*menuInfo)[cmd.get()] = help.get();
     }
 }
 
@@ -357,7 +403,7 @@ ServiceCommands::FloatData::FloatData(const String *name) : ParamData(ParamData:
 }
 
 void ServiceCommands::FloatData::addStatusInfo(String *msg) {
-    if (includeInStatus && (getFn != nullptr || ptr != nullptr)) {
+    if (getFn != nullptr || ptr != nullptr) {
         msg->concat("    ");
         msg->concat(name.get());
         msg->concat(": ");
@@ -369,6 +415,12 @@ void ServiceCommands::FloatData::addStatusInfo(String *msg) {
         }
         msg->concat(val);
         msg->concat("\n");
+    }
+}
+
+void ServiceCommands::FloatData::addMenuInfo(JsonObject *menuInfo) {
+    if (cmd.get() != nullptr && help.get() != nullptr) {
+        (*menuInfo)[cmd.get()] = help.get();
     }
 }
 
@@ -453,17 +505,24 @@ ServiceCommands::BoolData::BoolData(String *name) : ParamData(ParamData::Type::B
 
 void ServiceCommands::BoolData::addMenuInfo(JsonObject *menuInfo) {
     ParamData::addMenuInfo(menuInfo);
-    if (cmdOn != nullptr && helpOn != nullptr) {
-        (*menuInfo)[cmdOn.get()] = helpOn.get();
-    }
-    if (cmdOff != nullptr && helpOff != nullptr) {
-        (*menuInfo)[cmdOff.get()] = helpOff.get();
+    if (this->ptr != nullptr || this->setFn != nullptr) {
+        if (cmdOn != nullptr && helpOn != nullptr) {
+            (*menuInfo)[cmdOn.get()] = helpOn.get();
+        }
+        if (cmdOff != nullptr && helpOff != nullptr) {
+            (*menuInfo)[cmdOff.get()] = helpOff.get();
+        }
+        if ( cmd.get() != nullptr && help.get() != nullptr) {
+            (*menuInfo)[cmd.get()] = help.get();
+        }
     }
 }
 
 void ServiceCommands::BoolData::addHelpInfo(String *msg) {
     ParamData::addHelpInfo(msg);
+    int cntCmdOnOff = 0;
     if (cmdOn != nullptr && helpOn != nullptr) {
+        ++cntCmdOnOff;
         msg->concat("    ");
         msg->concat(cmdOn.get());
         msg->concat(": ");
@@ -471,16 +530,24 @@ void ServiceCommands::BoolData::addHelpInfo(String *msg) {
         msg->concat("\n");
     }
     if (cmdOff != nullptr && helpOff != nullptr) {
+        ++cntCmdOnOff;
         msg->concat("    ");
         msg->concat(cmdOff);
         msg->concat(": ");
         msg->concat(helpOff);
         msg->concat("\n");
     }
+    if (cmd != nullptr && help != nullptr && cntCmdOnOff < 2) {
+        msg->concat("    ");
+        msg->concat(cmd);
+        msg->concat(": ");
+        msg->concat(help);
+        msg->concat("\n");
+    }
 }
 
 void ServiceCommands::BoolData::addStatusInfo(String *msg) {
-    if (includeInStatus && (getFn != nullptr || ptr != nullptr)) {
+    if (getFn != nullptr || ptr != nullptr) {
         msg->concat("    ");
         msg->concat(name.get());
         msg->concat(": ");
@@ -536,14 +603,14 @@ void ServiceCommands::BoolData::save(JsonBuffer *buf, JsonObject *params) {
     (*params)[name.get()] = val;
 }
 
-ServiceCommands::StringData::StringData(const char *name, bool isConstant) : ParamData(ParamData::Type::BOOL_DATA, name, isConstant) {
+ServiceCommands::StringData::StringData(const char *name, bool isConstant) : ParamData(ParamData::Type::STRING_DATA, name, isConstant) {
     ptr = nullptr;
     setFn = nullptr;
     getFn = nullptr;
     event = -1;
 }
 
-ServiceCommands::StringData::StringData(const String *name) : ParamData(ParamData::Type::BOOL_DATA, name) {
+ServiceCommands::StringData::StringData(const String *name) : ParamData(ParamData::Type::STRING_DATA, name) {
     ptr = nullptr;
     setFn = nullptr;
     getFn = nullptr;
@@ -551,7 +618,7 @@ ServiceCommands::StringData::StringData(const String *name) : ParamData(ParamDat
 }
 
 void ServiceCommands::StringData::addStatusInfo(String *msg) {
-    if (includeInStatus && (getFn != nullptr || ptr != nullptr)) {
+    if (getFn != nullptr || ptr != nullptr) {
         msg->concat("    ");
         msg->concat(name.get());
         msg->concat(": ");
@@ -563,6 +630,12 @@ void ServiceCommands::StringData::addStatusInfo(String *msg) {
         }
         msg->concat(val);
         msg->concat("\n");
+    }
+}
+
+void ServiceCommands::StringData::addMenuInfo(JsonObject *menuInfo) {
+    if (cmd.get() != nullptr && help.get() != nullptr) {
+        (*menuInfo)[cmd.get()] = help.get();
     }
 }
 
@@ -605,12 +678,155 @@ void ServiceCommands::StringData::save(JsonBuffer *buf, JsonObject *params) {
     } else {
         val = *ptr;
     }
-    (*params)[name.get()] = buf->strdup(val.c_str());
+    (*params)[name.get()] = val;
 }
 
-//
-// ServiceCommandss
-//
+ServiceCommands::SysPinData::SysPinData(const char *name, bool isConstant) : ParamData(ParamData::Type::PIN_DATA, name, isConstant) {
+    ptr = nullptr;
+    setFn = nullptr;
+    getFn = nullptr;
+    event = -1;
+}
+
+ServiceCommands::SysPinData::SysPinData(const String *name) : ParamData(ParamData::Type::PIN_DATA, name) {
+    ptr = nullptr;
+    setFn = nullptr;
+    getFn = nullptr;
+    event = -1;
+}
+
+void ServiceCommands::SysPinData::addStatusInfo(String *msg) {
+    if (getFn != nullptr || ptr != nullptr) {
+        msg->concat("    ");
+        msg->concat(name.get());
+        msg->concat(": ");
+        msg->concat(ptr->getPin());
+        msg->concat("\n");
+    }
+}
+
+void ServiceCommands::SysPinData::addMenuInfo(JsonObject *menuInfo) {
+    if (cmd.get() != nullptr && help.get() != nullptr) {
+        (*menuInfo)[cmd.get()] = help.get();
+    }
+}
+
+bool ServiceCommands::SysPinData::load(const JsonVariant &val, bool isCheckOnly, String *msg) {
+    if (!val.success()) {
+        // keep current value
+        return true;
+    }
+    if (!val.is<int>()) {
+        *msg = "Expecting an integer for \"";
+        msg->concat(name);
+        msg->concat("\", but got ");
+        val.prettyPrintTo(*msg);
+        return false;
+    }
+    int v = val.as<int>();
+    if (v < -1) {
+        *msg = "Expecting an integer >0 or -1 for \"";
+        *msg += name;
+        msg->concat("\", but got ");
+        val.prettyPrintTo(*msg);
+        return false;
+    }
+    if (v > 99) {
+        *msg = "Expecting an integer < 99 for \"";
+        *msg += name;
+        msg->concat("\", but got ");
+        val.prettyPrintTo(*msg);
+        return false;
+    }
+    if (!isCheckOnly) {
+        if (setFn != nullptr) {
+            setFn(val.as<int>(), true, msg);
+        } else if (ptr != nullptr) {
+            ptr->setPin(val.as<int>());
+        }
+    }
+    return true;
+}
+
+void ServiceCommands::SysPinData::save(JsonBuffer *buf, JsonObject *params) {
+    if (!isPersistent) {
+        // no save
+        return;
+    }
+    (*params)[name.get()] = ptr->getPin();
+}
+
+ServiceCommands::JsonData::JsonData(const char *name, bool isConstant) : ParamData(ParamData::Type::JSON_DATA, name, isConstant) {
+    setFn = nullptr;
+    getFn = nullptr;
+    event = -1;
+}
+
+ServiceCommands::JsonData::JsonData(const String *name) : ParamData(ParamData::Type::JSON_DATA, name) {
+    setFn = nullptr;
+    getFn = nullptr;
+    event = -1;
+}
+
+void ServiceCommands::JsonData::addStatusInfo(String *msg) {
+    if (getFn != nullptr) {
+        msg->concat("    ");
+        msg->concat(name.get());
+        msg->concat(": ");
+        if (getFn != nullptr) {
+            DynamicJsonBuffer buf;
+            JsonVariant val = getFn(buf);
+            val.prettyPrintTo(*msg);
+        }
+        msg->concat("\n");
+    }
+}
+
+void ServiceCommands::JsonData::addMenuInfo(JsonObject *menuInfo) {
+    if (cmd.get() != nullptr && help.get() != nullptr) {
+        (*menuInfo)[cmd.get()] = help.get();
+    }
+}
+
+bool ServiceCommands::JsonData::load(const JsonVariant &val, bool isCheckOnly, String *msg) {
+    if (!val.success()) {
+        // keep current value
+        return true;
+    }
+    if (setFn == nullptr) {
+        *msg = "Cannot set value for \"";
+        msg->concat(name);
+        msg->concat("\", no set function was provided");
+        return false;
+    }
+    if (!isCheckOnly) {
+        if (setFn != nullptr) {
+            setFn(val, true, msg);
+        }
+    }
+    return true;
+}
+
+void ServiceCommands::JsonData::save(JsonBuffer *buf, JsonObject *params) {
+    if ((getFn == nullptr) || !isPersistent) {
+        // no save
+        return;
+    }
+    String val;
+    if (getFn != nullptr) {
+        JsonVariant val = getFn(*buf);
+        (*params)[name.get()] = val;
+    }
+}
+
+//  .d8888b.                            d8b                   .d8888b.                                                              888          
+// d88P  Y88b                           Y8P                  d88P  Y88b                                                             888          
+// Y88b.                                                     888    888                                                             888          
+//  "Y888b.    .d88b.  888d888 888  888 888  .d8888b .d88b.  888         .d88b.  88888b.d88b.  88888b.d88b.   8888b.  88888b.   .d88888 .d8888b  
+//     "Y88b. d8P  Y8b 888P"   888  888 888 d88P"   d8P  Y8b 888        d88""88b 888 "888 "88b 888 "888 "88b     "88b 888 "88b d88" 888 88K      
+//       "888 88888888 888     Y88  88P 888 888     88888888 888    888 888  888 888  888  888 888  888  888 .d888888 888  888 888  888 "Y8888b. 
+// Y88b  d88P Y8b.     888      Y8bd8P  888 Y88b.   Y8b.     Y88b  d88P Y88..88P 888  888  888 888  888  888 888  888 888  888 Y88b 888      X88 
+//  "Y8888P"   "Y8888  888       Y88P   888  "Y8888P "Y8888   "Y8888P"   "Y88P"  888  888  888 888  888  888 "Y888888 888  888  "Y88888  88888P' 
 
 ServiceCommands *CommandMgr::getServiceCommands(const char *serviceName) {
     for (auto i = serviceCommands.begin(); i != serviceCommands.end(); i++) {
@@ -668,7 +884,13 @@ ServiceCommands::ServiceCommands(const char *serviceName, CommandMgr *cmdMgr) {
         msg->concat(this->serviceName);
         msg->concat("\n");
         for (auto c = commandEntries.begin(); c != commandEntries.end(); ++c) {
-            (*c)->addStatusInfo(msg);
+            if ((*c)->includeInStatus) {
+                (*c)->addStatusInfo(msg);
+            } else {
+                msg->concat("    ");
+                msg->concat((*c)->name.get());
+                msg->concat(": <not shown>\n");
+            }
         }
         if (afterStatusFn != nullptr) {
             afterStatusFn(msg);
@@ -733,7 +955,7 @@ const char *ServiceCommands::getServiceName() {
 }
 
 void ServiceCommands::registerIntData(IntDataBuilder &builder) {
-    IntData *data = (IntData *)builder.getData();
+    IntData *data = builder.getData();
     if (data->cmd != nullptr) {
         String sn("cmd:");
         sn.concat(serviceName);
@@ -790,9 +1012,11 @@ void ServiceCommands::registerIntData(IntDataBuilder &builder) {
                     }
                     if (data->setFn != nullptr) {
                         rc = data->setFn(val, false, msg);
-                    } else {
+                    } else if (data->ptr) {
                         *data->ptr = val;
                         rc = true;
+                    } else {
+                        rc = false;
                     }
                     return rc;
                 }
@@ -853,9 +1077,11 @@ void ServiceCommands::registerFloatData(FloatDataBuilder &builder) {
                     }
                     if (data->setFn != nullptr) {
                         rc = data->setFn(val, false, msg);
-                    } else {
+                    } else if (data->ptr != nullptr) {
                         *data->ptr = val;
                         rc = true;
+                    } else {
+                        rc = false;
                     }
                     return rc;
                 }
@@ -901,9 +1127,11 @@ void ServiceCommands::registerBoolData(BoolDataBuilder &builder) {
                     }
                     if (data->setFn != nullptr) {
                         rc = data->setFn(val, false, msg);
-                    } else {
+                    } else if (data->ptr != nullptr) {
                         *data->ptr = val;
                         rc = true;
+                    } else {
+                        rc = false;
                     }
                     return rc;
                 }
@@ -956,7 +1184,7 @@ void ServiceCommands::registerStringData(StringDataBuilder &builder) {
         String sn("cmd:");
         sn.concat(serviceName);
         data->event = cmdMgr->getEventLoop()->getEventType(sn.c_str(), data->cmd);
-        if (data->setFn != nullptr || data->ptr != nullptr) {
+        if (data->getFn != nullptr || data->setFn != nullptr || data->ptr != nullptr) {
             cmdMgr->getEventLoop()->onEvent(data->event, [data](UEvent *event) -> bool {
                 String *msg = reinterpret_cast<String *>(const_cast<void *>(event->dataPtr));
                 const char *p = msg->c_str();
@@ -984,9 +1212,109 @@ void ServiceCommands::registerStringData(StringDataBuilder &builder) {
                     }
                     if (data->setFn != nullptr) {
                         rc = data->setFn(val, false, msg);
-                    } else {
+                    } else if (data->ptr != nullptr) {
                         *data->ptr = val;
                         rc = true;
+                    } else {
+                        rc = false;
+                    }
+                    return rc;
+                }
+            });
+        };
+    }
+
+    commandEntries.push_back(data);
+}
+
+void ServiceCommands::registerSysPinData(SysPinDataBuilder &builder) {
+    SysPinData *data = builder.getData();
+    if (data->cmd != nullptr) {
+        String sn("cmd:");
+        sn.concat(serviceName);
+        data->event = cmdMgr->getEventLoop()->getEventType(sn.c_str(), data->cmd);
+        if (data->setFn != nullptr || data->getFn != nullptr || data->ptr != nullptr) {
+            cmdMgr->getEventLoop()->onEvent(data->event, [data](UEvent *event) -> bool {
+                String *msg = reinterpret_cast<String *>(const_cast<void *>(event->dataPtr));
+                const char *p = msg->c_str();
+                while (*p != '\0' && isspace(*p)) {
+                    ++p;
+                }
+                if (*p == '\0') {  // doing a show value
+                    msg->clear();
+                    msg->concat(*data->ptr);
+                    return true;
+                } else {  // doing a set value
+                    int val;
+                    bool rc = CommandMgr::getIntValue(event, &val);
+                    if (!rc) {
+                        return false;
+                    }
+                    // controls
+                    if (val < -1) {
+                        *msg = "Value ";
+                        msg->concat(val);
+                        msg->concat(" must be positive or -1");
+                        return false;
+                    }
+                    if (val > 99) {
+                        *msg = "Value ";
+                        msg->concat(val);
+                        msg->concat(" must be not greater than 99");
+                        return false;
+                    }
+                    if (data->setFn != nullptr) {
+                        rc = data->setFn(val, false, msg);
+                    } else if (data->ptr) {
+                        data->ptr->setPin(val);
+                        rc = true;
+                    } else {
+                        rc = false;
+                    }
+                    return rc;
+                }
+            });
+        };
+    }
+
+    commandEntries.push_back(data);
+}
+
+void ServiceCommands::registerJsonData(JsonDataBuilder &builder) {
+    JsonData *data = (JsonData *)builder.getData();
+    if (data->cmd != nullptr) {
+        String sn("cmd:");
+        sn.concat(serviceName);
+        data->event = cmdMgr->getEventLoop()->getEventType(sn.c_str(), data->cmd);
+        if (data->getFn != nullptr || data->setFn != nullptr) {
+            cmdMgr->getEventLoop()->onEvent(data->event, [data](UEvent *event) -> bool {
+                String *msg = reinterpret_cast<String *>(const_cast<void *>(event->dataPtr));
+                const char *p = msg->c_str();
+                while (*p != '\0' && isspace(*p)) {
+                    ++p;
+                }
+                if (*p == '\0') {  // doing a show value
+                    msg->clear();
+                    if (data->getFn != nullptr) {
+                        DynamicJsonBuffer buf;
+                        JsonVariant val = data->getFn(buf);
+                        val.prettyPrintTo(*msg);
+                        return true;
+                    } else {
+                        return false;
+                    }
+                } else {  // doing a set value
+                    String val;
+                    bool rc = CommandMgr::getStringValue(event, &val);
+                    if (!rc) {
+                        return false;
+                    }
+                    if (data->setFn != nullptr) {
+                        DynamicJsonBuffer buf;
+                        JsonVariant json = buf.parse(val);
+                        rc = data->setFn(json, false, msg);
+                    } else {
+                        rc = false;
                     }
                     return rc;
                 }
@@ -1102,8 +1430,6 @@ bool ServiceCommands::readConfigFile(DynamicJsonBuffer &buf, JsonObject **params
         return false;
     }
     Serial.printf("Read configuration for service %s from file %s:\n", serviceName.c_str(), configFile.c_str());
-    cfg.prettyPrintTo(Serial);
-    Serial.println();
     *params = &cfg;
     return true;
 }

@@ -1,0 +1,9 @@
+{
+  "default": {
+    "recordsCapacity": 511,
+    "level": "DEBUG",
+    "syslogServer": "off",
+    "syslogPort": 514
+  },
+  "defaultKey": "default"
+}

@@ -12,7 +12,7 @@
 #include "LedSparkEffect.h"
 
 
-EffectSparks::EffectSparks(int controllerId, CRGB *leds, int totalLedCount, int defaultLedStart, int defaultLedCount, const char *description)
+EffectSparks::EffectSparks(int controllerId, LedMap1d *leds, int totalLedCount, int defaultLedStart, int defaultLedCount, const char *description)
     : Effect(controllerId, leds, totalLedCount, description)
 {
     attackValPerFrame = nullptr;
@@ -87,6 +87,8 @@ void EffectSparks::init(int millisPerFrame, CommandMgr *commandMgr, uint32_t fra
 
     String controllerName = "led"; controllerName += String(controllerId);
     cmd = commandMgr->getServiceCommands(controllerName.c_str());
+
+    cmd->onAfterLoad([this](String *msg) { this->onAfterLoad(); });
 
     cmd->registerBoolData(
         ServiceCommands::BoolDataBuilder("isEnabled", true)
@@ -216,9 +218,8 @@ void EffectSparks::init(int millisPerFrame, CommandMgr *commandMgr, uint32_t fra
     statAvgSparkingPct = 0;
 }
 
-void EffectSparks::onAfterLoad(int millisPerFrame)
+void EffectSparks::onAfterLoad()
 {
-    this->millisPerFrame = millisPerFrame;
     calcFrameProperties();
 }
 
@@ -499,7 +500,7 @@ void EffectSparks::calc(uint32_t frame)
 
         // last effect wins unless it is 0
         if (color != CRGB(0,0,0)) {
-            leds[ledStart + i] = color;
+            *leds->at(ledStart + i) = color;
         }
 
 //         // stongest luma wins

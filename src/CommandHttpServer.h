@@ -5,14 +5,16 @@
 #include "UEvent.h"
 #include "Monitor.h"
 #include "CommandMgr.h"
+#include "LogMgr.h"
 
 class CommandHttpServer {
 public:
   CommandHttpServer();
   ~CommandHttpServer();
-  void init(AsyncWebServer *server, CommandMgr *commandMgr);
+  void init(AsyncWebServer *server, CommandMgr *commandMgr, LogMgr *logMgr);
 private:
   CommandMgr *commandMgr;
+  Logger *logger;
 
   void processCommand(String cmdm, AsyncWebSocketClient *client);
 

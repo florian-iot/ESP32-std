@@ -6,7 +6,7 @@
 #include <functional>
 #include <WString.h>
 #include <functional>
-#include <FreeRTOS.h>
+#include <freertos/FreeRTOS.h>
 #include <freertos/queue.h>
 #include <vector>
 #include <unordered_map>
@@ -48,7 +48,7 @@ struct UEvent {
     UEvent() { eventType = -1; }
     UEvent(uint32_t eventType) { this->eventType = eventType; }
     UEvent(uint32_t eventType, void *data) { this->eventType = eventType; this->dataPtr = data; }
-    UEvent(uint32_t eventType, int data) { this->eventType = eventType; this->dataInt = data; }
+    UEvent(uint32_t eventType, int64_t data) { this->eventType = eventType; this->dataInt = data; }
     UEvent(const UEvent &other) { memcpy(this, &other, sizeof(UEvent)); }
 };
 
@@ -60,6 +60,10 @@ friend class UEventLoop;
 public:
     UEventHandle_t() { handle = -1; }
     UEventHandle_t(const UEventHandle_t &other) { handle = other.handle; }
+    bool operator ==(const UEventHandle_t &other) { return other.handle == handle; }
+    bool operator !=(const UEventHandle_t &other) { return other.handle != handle; }
+    bool isSet() { return handle != -1; }
+    void clear() { handle = -1; }
 };
 
 
@@ -178,14 +182,26 @@ public:
      * Queue an event, to be processed when its turn comes. If semaphore is
      * specified, a "give" will be performed on it after the event is consumed (processed or not).
      */
-    bool queueEvent(UEvent &event, std::function<void(UEvent*)> finalizer, SemaphoreHandle_t = nullptr);
-    bool queueEvent(UEvent &event, std::function<void(UEvent*)> finalizer,
+    bool queueEvent(const UEvent &event, std::function<void(UEvent*)> finalizer, SemaphoreHandle_t = nullptr);
+    bool queueEvent(const UEvent &event, std::function<void(UEvent*)> finalizer,
             std::function<void(UEvent *event, bool isProcessed)> onProcess = nullptr, SemaphoreHandle_t = nullptr);
 
     void registerTimer(UEventLoopTimer *timer);
-    void registerTimer(UEventLoopTimer *timer, std::function<void(*)(UEventLoop *)> callback);
-
+    void registerTimer(UEventLoopTimer *timer, std::function<void(UEventLoopTimer *)> callback);
     void unregisterTimer(UEventLoopTimer *timer);
+
+public:
+    // we need this structure to be in DRAM, so that it can be used from an ISR
+    class IsrData {
+        friend class UEventLoop;
+    private:
+        QueueHandle_t queueHandle;
+    public:
+        // returns true if the event was sent, false if not sent (e.g., queue full)
+        bool IRAM_ATTR queueEventFromIsr(UEvent &event);
+    };
+
+    void initIsrData(IsrData *q);
 
 };
 
@@ -250,6 +266,8 @@ public:
     void setTimeoutMicros(std::function<void(UEventLoopTimer *)> callback, long intervalMicros);
     void setTimeoutMicros(long intervalMicros);
     void cancelTimeout();
+    long getTimeout();
+    long getTimeoutMicros();
 
     bool isActive();
     /**

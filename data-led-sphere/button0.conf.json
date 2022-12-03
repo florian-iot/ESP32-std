@@ -1,0 +1,18 @@
+{
+  "default": {
+    "pin": 32,
+    "isTouch": true,
+    "reversed": false,
+    "pull": "NONE",
+    "touchReadMeasure": 5000,
+    "touchReadSleep": 4096,
+    "touchValueThreshold": 75,
+    "touchMillisThreshold": 100,
+    "debounceMillis": 10,
+    "dClickMillis": 300,
+    "tClickMillis": 300,
+    "longClickMillis": 2000,
+    "enable": true
+  },
+  "defaultKey": "default"
+}

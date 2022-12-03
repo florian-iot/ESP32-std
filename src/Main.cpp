@@ -1,12 +1,9 @@
 #include "CompilationOpts.h"
 
-
 //**********************
 
 #include <WiFi.h>
 #include <WebServer.h>
-//#define AC_DEBUG 1
-#include <AutoConnect.h>
 #include <MDNS.h>
 #include <Update.h>
 #include <FS.h>
@@ -33,104 +30,136 @@
 #include "CommandHttpServer.h"
 #include "UEvent.h"
 #include "LogMgr.h"
+#include "Dfa.h"
+#include "Util.h"
 
+#include "RebootDetectorService.h"
+#include "SystemService.h"
+#include "WifiServiceAsync.h"
+#include "MqttService.h"
 #include "LedService.h"
 #include "CommandMgr.h"
+#include "ButtonService.h"
+#include "BeeperService.h"
 #include "Stepper.h"
 #include "HeartbeatService.h"
+#include "LedIndicatorService.h"
 #include "LM75A_TempService.h"
-
-#define TO_STR2(x) #x
-#define TO_STR(x) TO_STR2(x)
-
-const char * compilationDefines = "\n"
-"    Wifi password in standalone mode: " AUTOCONNECT_PSK "\n"
-
-#ifdef USE_LOGGING
-"    USE_LOGGING"
-#ifdef LOGGING_ENABLE_TESTS
-" (with tests)"
-#endif
-"\n"
-#endif
-
-#ifdef USE_LED
-"    USE_LED(FASTLED version " TO_STR(FASTLED_VERSION) ", pins compiled in: " TO_STR(LED_PIN_1) ", " TO_STR(LED_PIN_2) ", " TO_STR(LED_PIN_3)
-  ", " TO_STR(LED_PIN_4) ", " TO_STR(LED_PIN_5) ", " TO_STR(LED_PIN_6)
-  ", " TO_STR(LED_PIN_7) ", " TO_STR(LED_PIN_8) ", " TO_STR(LED_PIN_9)
-  ", " TO_STR(LED_PIN_10) ")\n"
-#endif
-#ifdef USE_HEARTBEAT
-"    USE_HEARTBEAT(pin " TO_STR(HEARTBEAT_PIN) ")\n"
-#endif
-#ifdef USE_SPIFFS_EDITOR
-"    USE_SPIFFS_EDITOR(user " TO_STR(SPIFFS_EDITOR_USER) ", password " TO_STR(SPIFFS_EDITOR_PWD) ")\n"
-#endif
-#ifdef USE_MONITOR_TEST
-"    USE_MONITOR_TEST\n"
-#endif
-#ifdef USE_EVENT_CHECK_HEAP
-"    USE_EVENT_CHECK_HEAP\n"
-#endif
-
-#ifdef USE_STEPPER
-"    USE_STEPPER(pins: ENABLE=" TO_STR(STEPPER_ENABLE_PIN)
-    ", M0/1/2=" TO_STR(STEPPER_M0_PIN) "/" TO_STR(STEPPER_M1_PIN) "/" TO_STR(STEPPER_M2_PIN)
-    ", RESET=" TO_STR(STEPPER_RESET_PIN)
-    ", SLEEP=" TO_STR(STEPPER_SLEEP_PIN)
-    ", STEP=" TO_STR(STEPPER_STEP_PIN)
-    ", DIR=" TO_STR(STEPPER_DIR_PIN)
-    ", FAULT=" TO_STR(STEPPER_FAULT_PIN)
-    ")\n"
-#endif
-
-#ifdef USE_LM75A_TEMP
-"    USE_LM75A_TEMP(SDA=" TO_STR(LM75A_TEMP_SDA)
-    ", SCL=" TO_STR(LM75A_TEMP_SCL)
-    ", I2CADDRESS=" TO_STR(LM75A_TEMP_I2CADDRESS)
-    ")\n"
-#endif
-
-;
-
-
-using namespace fs;
-
+#include "AM2320Service.h"
+#include "UartService.h"
+#include "Sim7000.h"
+#include "ServoService.h"
+#include "EEPROMFsService.h"
+#include "Comm433Service.h"
+#include "RtcPcf8563.h"
+#include "STWD100Service.h"
+#include "Ina3221Service.h"
+#include "IvanSupervisor.h"
+#include "LedSphereService.h"
+#include "Gpsdo.h"
+#include "Ble.h"
+#include "Esp32I2c.h"
+#include "HeaterService.h"
 
 class Services {
 public:
-  LogMgr *logMgr;
-  LogService *logService;
-  AsyncWebServer *server;
-  WebServer *autoConnectServer;
-  AutoConnect *autoConnectPortal;
-  OTA *ota;
-  UEventLoop *eventLoop;
-  CommandMgr *commandMgr;
-  WebSocketsServer *wsServer;
-  CommandHttpServer *commandHttpServer;
-  Services *services;
+  LogMgr *logMgr = nullptr;
+  LogService *logService = nullptr;
+#ifdef USE_REBOOT_DETECTOR
+  RebootDetectorService *rebootDetector = nullptr;
+#endif
+  WifiAsyncService *wifiService = nullptr;
+#ifdef USE_MQTT
+  MqttService *mqttService = nullptr;
+#endif
+  WebSocketsServer *wsServer = nullptr;
+  AsyncWebServer *server = nullptr;
+  OTA *ota = nullptr;
+  UEventLoop *eventLoop = nullptr;
+  CommandMgr *commandMgr = nullptr;
+  bool isWsServerInitialized = false;
+  CommandHttpServer *commandHttpServer = nullptr;
+  SystemService *systemService = nullptr;
+
+  #ifdef USE_BUTTON
+  ButtonService *buttonService = nullptr;
+  #endif
+  #ifdef USE_BEEPER
+  BeeperService *beeperService = nullptr;
+  #endif
   #ifdef USE_HEARTBEAT
-  HeartbeatService *heartbeatService;
+  HeartbeatService *heartbeatService = nullptr;
+  #endif
+  #ifdef USE_LED_INDICATOR
+  LedIndicatorService *ledIndicatorService = nullptr;
   #endif
   #ifdef USE_LM75A_TEMP
-  LM75A_TempService *tempService;
+  LM75A_TempService *tempService = nullptr;
+  #endif
+  #ifdef USE_AM2320
+  AM2320Service *am2320Service = nullptr;
   #endif
   #ifdef USE_LED
-  LedService *ledService;
+  LedService *ledService = nullptr;
   #endif
   #ifdef USE_STEPPER
-  Stepper *stepper;
+  Stepper *stepper = nullptr;
+  #endif
+  #ifdef USE_UART
+  UartService *uart = nullptr;
+  #endif
+  #ifdef USE_SIM7000
+  Sim7000Service *sim7000 = nullptr;
+  #endif
+  #ifdef USE_SERVO
+  ServoService *servo = nullptr;
+  #endif
+  #ifdef USE_EEPROM_LFS
+  EEPROMFsService *eepromLfs = nullptr;
+  #endif
+  #ifdef USE_COMM433
+  Comm433Service *comm433 = nullptr;
+  #endif
+  #ifdef USE_PCF8563
+  RtcPcf8563Service *rtcPcf8563 = nullptr;
+  #endif
+  #ifdef USE_STWD100
+  STWD100Service *stwd100 = nullptr;
+  #endif
+  #ifdef USE_INA3221
+  Ina3221Service *ina3221 = nullptr;
+  #endif
+  #ifdef USE_BLE
+  BleService *ble = nullptr;
+  #endif
+  #ifdef USE_ESP32I2C
+  Esp32I2cService *esp32i2c = nullptr;
+  #endif
+  #ifdef USE_IVAN_SUPERVISOR
+  IvanSupervisorService *ivanSupervisor = nullptr;
+  #endif
+  #ifdef USE_LED_SPHERE
+  LedSphereService *ledSphere = nullptr;
+  #endif
+  #ifdef USE_GPSDO
+  GpsdoFreqCounterService *gpsdo = nullptr;
+  #endif
+  #ifdef USE_HEATER
+  HeaterService *heater = nullptr;
   #endif
 };
 
 Services services;
+Dfa mainDfa("mainDfa", 1);
 
-int sdaPin;
-int sclPin;
+Dfa::Input MAIN_WIFI_INITIALIZED = mainDfa.nextInput("MAIN_WIFI_INITIALIZED");
+
+Dfa::State MAIN_INIT_START = mainDfa.nextState("MAIN_INIT_START");
+Dfa::State MAIN_INIT_LOOP = mainDfa.nextState("MAIN_INIT_LOOP");
+Dfa::State MAIN_INIT_DONE = mainDfa.nextState("MAIN_INIT_DONE");
+UEventHandle_t wifiInitializedEventHandler;
 
 long stateTs;
-volatile boolean mustReboot = false;
 
 #include <driver/i2c.h>
 #include <esp_log.h>
@@ -139,62 +168,16 @@ volatile boolean mustReboot = false;
 #include <stdio.h>
 #include "sdkconfig.h"
 
-
-void getInfo(String *info)
-{
-  String macAddress = WiFi.macAddress();
-  String hostName = (macAddress.length() != 17 ? String("esp32-xx")
-      : String("esp32-") + macAddress[12] + macAddress[13] + macAddress[15] + macAddress[16]);
-
-  esp_chip_info_t chipInfo;
-  esp_chip_info(&chipInfo);
-  info->concat("Firmware version " __DATE__ " " __TIME__ ", hostname "); info->concat(hostName.c_str()); info->concat("\n");
-  (*info) += "ESP32 Cores: " + String(chipInfo.cores) + " Frequency: " + String(ESP.getCpuFreqMHz()) + " MHz, Chip revision: "
-    + String(chipInfo.revision) + ",\n"
-    + "Heap " + ESP.getHeapSize() + " (" + ESP.getFreeHeap() + " free), Cycles " + ESP.getCycleCount()
-    + ", Program size " + ESP.getSketchSize() + "\n"
-    + "Compiled with: " + compilationDefines;
-}
+void initWebServer();
 
 void setup() {
+
   Serial.begin(115200);
   Serial.setDebugOutput(true);
-  delay(100);
+  Serial.println("Starting up!\n");
 
-  String info;
-  getInfo(&info);
-  Serial.println(info);
-  info.clear();
-
-  esp_reset_reason_t resetReason = esp_reset_reason();
-  const char *reasonStr;
-  switch (resetReason) {
-    case ESP_RST_UNKNOWN: reasonStr = "Reset reason can not be determined."; break;
-    case ESP_RST_POWERON: reasonStr = "Reset due to power-on event."; break;
-    case ESP_RST_EXT: reasonStr = "Reset by external pin (not applicable for ESP32)."; break;
-    case ESP_RST_SW: reasonStr = "Software reset via esp_restart."; break;
-    case ESP_RST_PANIC: reasonStr = "Software reset due to exception/panic."; break;
-    case ESP_RST_INT_WDT: reasonStr = "Reset (software or hardware) due to interrupt watchdog."; break;
-    case ESP_RST_TASK_WDT: reasonStr = "Reset due to task watchdog."; break;
-    case ESP_RST_WDT: reasonStr = "Reset due to other watchdogs."; break;
-    case ESP_RST_DEEPSLEEP: reasonStr = "Reset after exiting deep sleep mode."; break;
-    case ESP_RST_BROWNOUT: reasonStr = "Brownout reset (software or hardware)."; break;
-    case ESP_RST_SDIO: reasonStr = "Reset over SDIO."; break;
-    default: reasonStr = "Reset reason unknown."; break;
-  }
-  Serial.printf("Reset reason: %s\n", reasonStr);
-  if (resetReason == ESP_RST_UNKNOWN
-    || resetReason == ESP_RST_PANIC
-    || resetReason == ESP_RST_INT_WDT
-    || resetReason == ESP_RST_TASK_WDT
-    || resetReason == ESP_RST_WDT) {
-      int d = 5;
-      Serial.printf("Delaying initialization %d seconds because of the reset reason \"%s\"\n",
-          d, reasonStr);
-      delay(d * 1000);
-  }
-  delay(1000);
-  Serial.printf("Main program, current thread %p\n", xTaskGetCurrentTaskHandle());
+  services.systemService = new SystemService();
+  Serial.println(".... Created SystemService");
 
   // Initialize services
 
@@ -203,13 +186,15 @@ void setup() {
   services.logMgr = new LogMgr();
   Serial.println(".... Created LogMgr");
   services.logService = new LogService();
+#ifdef USE_REBOOT_DETECTOR
+  services.rebootDetector = new RebootDetectorService();
+  Serial.println(".... Created RebootDetectorService");
+#endif
   Serial.println(".... Created LogService");
   services.server = new AsyncWebServer(8080);
   Serial.println(".... Created AsyncWebServer");
-  services.autoConnectServer = new WebServer(80);
-  Serial.println(".... Created WebServer");
-  services.autoConnectPortal = new AutoConnect(*services.autoConnectServer);
-  Serial.println(".... Created AutoConnect");
+  services.wifiService = new WifiAsyncService();
+  Serial.println(".... Created WifiService");
   services.ota = new OTA();
   Serial.println(".... Created OTA");
   services.eventLoop = new UEventLoop("Main");
@@ -220,10 +205,29 @@ void setup() {
   Serial.println(".... Created WebSocketsServer");
   services.commandHttpServer = new CommandHttpServer();
   Serial.println(".... Created CommandHttpServer");
+  #ifdef USE_MQTT
+  services.mqttService = new MqttService();
+  Serial.println(".... Created MqttServer");
+  #endif
+
+  #ifdef USE_BUTTON
+  services.buttonService = new ButtonService();
+  Serial.println(".... Created ButtonService");
+  #endif
+
+  #ifdef USE_BEEPER
+  services.beeperService = new BeeperService();
+  Serial.println(".... Created BeeperService");
+  #endif
 
   #ifdef USE_HEARTBEAT
   services.heartbeatService = new HeartbeatService();
   Serial.println(".... Created HeartbeatService");
+  #endif
+
+  #ifdef USE_LED_INDICATOR
+  services.ledIndicatorService = new LedIndicatorService();
+  Serial.println(".... Created LedIndicatorService");
   #endif
 
   #ifdef USE_LM75A_TEMP
@@ -231,8 +235,13 @@ void setup() {
   Serial.println(".... Created LM75A_TempService");
   #endif
 
+  #ifdef USE_AM2320
+  services.am2320Service = new AM2320Service();
+  Serial.println(".... Created AM2320Service");
+  #endif
+
   #ifdef USE_LED
-  services.ledService = LedService();
+  services.ledService = new LedService();
   Serial.println(".... Created LedService");
   #endif
 
@@ -241,11 +250,397 @@ void setup() {
   Serial.println(".... Created Stepper");
   #endif
 
+  #ifdef USE_UART
+  services.uart = new UartService();
+  Serial.println(".... Created Uart service");
+  #endif
+
+  #ifdef USE_SIM7000
+  services.sim7000 = new Sim7000Service();
+  Serial.println(".... Created Sim7000 service");
+  #endif
+
+  #ifdef USE_SERVO
+  services.servo = new ServoService();
+  Serial.println(".... Created Servo service");
+  #endif
+
+  #ifdef USE_EEPROM_LFS
+  services.eepromLfs = new EEPROMFsService();
+  Serial.println(".... Created EEPROM LFS ervice");
+  #endif
+
+  #ifdef USE_COMM433
+  services.comm433 = new Comm433Service();
+  Serial.println(".... Created Comm433 service");
+  #endif
+
+  #ifdef USE_PCF8563
+  services.rtcPcf8563 = new RtcPcf8563Service();
+  Serial.println(".... Created RtcPcf8563 service");
+  #endif
+
+  #ifdef USE_STWD100
+  services.stwd100 = new STWD100Service();
+  Serial.println(".... Created STDW100 service");
+  #endif
+
+  #ifdef USE_INA3221
+  services.ina3221 = new Ina3221Service();
+  Serial.println(".... Created Ina3221 service");
+  #endif
+
+  #ifdef USE_BLE
+  services.ble = new BleService();
+  Serial.println(".... Created Ble service");
+  #endif
+
+  #ifdef USE_ESP32I2C
+  services.esp32i2c = new Esp32I2cService();
+  Serial.println(".... Created Esp32I2c service");
+  #endif
+
+  #ifdef USE_IVAN_SUPERVISOR
+  services.ivanSupervisor = new IvanSupervisorService();
+  Serial.println(".... Created IvanSupervisor service");
+  #endif
+
+  #ifdef USE_LED_SPHERE
+  services.ledSphere = new LedSphereService();
+  Serial.println(".... Created LedSphere service");
+  #endif
+
+  #ifdef USE_GPSDO
+  services.gpsdo = new GpsdoFreqCounterService();
+  Serial.println(".... Created Gpsdo service");
+  #endif
+
+  #ifdef USE_HEATER
+  services.heater = new HeaterService();
+  Serial.println(".... Created Heater service");
+  #endif
+
   Serial.println("Terminated service creation");
 
-  Serial.println("Initializing LogMgr");
+  bool spiffsOk = SPIFFS.begin(false); // true: if not formatted, format
+  if (!spiffsOk) {
+    Serial.println("SPIFFS not formatted, formatting...");
+    spiffsOk = SPIFFS.begin(true);
+    Serial.printf("SPIFFS formatting %s\n", spiffsOk ? "OK" : " failure");
+  }
+  Serial.println("Initialized SPIFFS");
+
   services.logMgr->init();
   Serial.println("Initialized LogMgr");
+
+  services.commandMgr->init(services.eventLoop);
+  Serial.println("Initialized CommandMgr");
+
+  Serial.println("Initializing Log service...");
+  services.logService->init(services.logMgr, services.eventLoop, services.commandMgr);
+  Serial.println("Log service intialized");
+
+  // time-critic initializations
+#ifdef USE_STWD100
+  Serial.println("Initializing STWD100...");
+  services.stwd100->init(services.eventLoop, services.commandMgr, services.logMgr);
+  Serial.println("STWD100 service initialized");
+#endif
+
+  struct ServiceInit {
+    std::function<void()> init;
+    const char *name;
+    // The service will be started in all reboot levels less or equal to this one
+    RebootDetectorService::Level rebootLevel;
+    ServiceInit(const char *name, RebootDetectorService::Level lvl, std::function<void()> init) {
+      this->init = init; rebootLevel = lvl; this->name = name;
+    }
+  };
+  std::vector<ServiceInit> *sList = new std::vector<ServiceInit>(); // allocated because we want it to survive this function and be used in DFA
+
+  sList->push_back(ServiceInit("System", RebootDetectorService::MINIMUM, []() {
+      services.systemService->init(services.eventLoop, services.commandMgr, services.logMgr); }));
+  #ifdef USE_BUTTON
+  sList->push_back(ServiceInit("Button", RebootDetectorService::MINIMUM, []() {
+    services.buttonService->init(services.eventLoop, services.commandMgr, services.logMgr, services.systemService); }));
+  #endif
+  #ifdef USE_EEPROM_LFS
+  sList->push_back(ServiceInit("EEPROM LFS", RebootDetectorService::MINIMUM, []() {
+      services.eepromLfs->init(services.eventLoop, services.commandMgr, services.logMgr, services.systemService); }));
+  #endif
+  #ifdef USE_REBOOT_DETECTOR
+  sList->push_back(ServiceInit("RebootDetector", RebootDetectorService::MINIMUM, []() {
+    fs::FS *fs;
+    bool isEeprom;
+    #ifdef USE_EEPROM_LFS
+    fs = services.eepromLfs->getFs();
+    if (fs == nullptr) {
+      fs = &SPIFFS;
+      isEeprom = false;
+    } else {
+      isEeprom = true;
+    }
+    #else
+    fs = &SPIFFS;
+    isEeprom = false;
+    #endif
+    Serial.printf("Initializing RebootDetector using %s\n", isEeprom ? "EEPROM FS" : "SPIFFS");
+    services.rebootDetector->init(services.eventLoop, services.commandMgr, services.logMgr, services.systemService, fs);
+  }));
+  #endif
+  #ifdef USE_HEARTBEAT
+  sList->push_back(ServiceInit("Heartbeat", RebootDetectorService::INFRASTRUCTURE, []() {
+      services.heartbeatService->init(services.eventLoop, services.commandMgr, services.logMgr); }));
+  #endif
+  #ifdef USE_BEEPER
+  sList->push_back(ServiceInit("Beeper", RebootDetectorService::INFRASTRUCTURE, []() {
+    services.beeperService->init(services.eventLoop, services.commandMgr, services.logMgr, services.systemService); }));
+  #endif
+  #ifdef USE_LED_INDICATOR
+  sList->push_back(ServiceInit("LedIndicator", RebootDetectorService::APPLICATION, []() {
+      services.ledIndicatorService->init(services.eventLoop, services.commandMgr, services.logMgr); }));
+  #endif
+  sList->push_back(ServiceInit("Wifi", RebootDetectorService::INFRASTRUCTURE, []() {
+    services.wifiService->init(services.server, services.eventLoop, services.commandMgr, services.logMgr); }));
+  sList->push_back(ServiceInit("OTA", RebootDetectorService::INFRASTRUCTURE, []() {
+      services.ota->init(services.server, services.logMgr, []() { return true; }, [](bool succeeded) {
+        if (succeeded) {
+          services.systemService->setMustReboot();
+        }
+      }); }));
+  #ifdef USE_MQTT
+  sList->push_back(ServiceInit("Mqtt", RebootDetectorService::INFRASTRUCTURE, []() {
+    services.mqttService->init(services.eventLoop, services.commandMgr, services.wifiService, services.logMgr);
+  }));
+  #endif
+  #ifdef USE_LM75A_TEMP
+  sList->push_back(ServiceInit("LM75A", RebootDetectorService::APPLICATION, []() {
+    services.tempService->init(services.eventLoop, services.commandMgr, services.systemService, services.logMgr);
+  }));
+  #endif
+  #ifdef USE_AM2320
+  sList->push_back(ServiceInit("AM2320", RebootDetectorService::APPLICATION, []() {
+    services.am2320Service->init(services.eventLoop, services.commandMgr, services.systemService, services.logMgr);
+  }));
+  #endif
+  #ifdef USE_LED
+  sList->push_back(ServiceInit("Led", RebootDetectorService::APPLICATION, []() {
+    services.ledService->init(services.eventLoop, services.commandMgr, services.logMgr); }));
+  #endif
+  #ifdef USE_STEPPER
+  sList->push_back(ServiceInit("Stepper", RebootDetectorService::APPLICATION, []() {
+    services.stepper->init(services.eventLoop, services.commandMgr, services.logMgr); }));
+  #endif
+  #ifdef USE_UART
+  sList->push_back(ServiceInit("UART", RebootDetectorService::APPLICATION, []() {
+    services.uart->init(services.eventLoop, services.commandMgr, services.logMgr); }));
+  #endif
+  #ifdef USE_SIM7000
+  sList->push_back(ServiceInit("Sim7000", RebootDetectorService::APPLICATION, []() {
+    services.sim7000->init(services.eventLoop, services.commandMgr, services.uart, services.logMgr); }));
+  #endif
+  #ifdef USE_SERVO
+  sList->push_back(ServiceInit("Servo", RebootDetectorService::APPLICATION, []() {
+    services.servo->init(services.eventLoop, services.commandMgr, services.logMgr); }));
+  #endif
+  #ifdef USE_COMM433
+  sList->push_back(ServiceInit("Comm433", RebootDetectorService::APPLICATION, []() {
+    services.comm433->init(services.eventLoop, services.commandMgr, services.logMgr); }));
+  #endif
+  #ifdef USE_PCF8563
+  sList->push_back(ServiceInit("RtcPcf8563", RebootDetectorService::APPLICATION, []() {
+    services.rtcPcf8563->init(services.eventLoop, services.commandMgr, services.logMgr, services.systemService); }));
+  #endif
+  #ifdef USE_INA3221
+  sList->push_back(ServiceInit("Ina3221", RebootDetectorService::APPLICATION, []() {
+    services.ina3221->init(services.eventLoop, services.commandMgr, services.logMgr, services.systemService); }));
+  #endif
+  #ifdef USE_BLE
+  sList->push_back(ServiceInit("Ble", RebootDetectorService::APPLICATION, []() {
+    services.ble->init(services.eventLoop, services.commandMgr, services.logMgr);
+  }));
+  #endif
+  #ifdef USE_ESP32I2C
+  sList->push_back(ServiceInit("Esp32I2C", RebootDetectorService::APPLICATION, []() {
+    services.esp32i2c->init(services.eventLoop, services.commandMgr, services.systemService, services.logMgr);
+  }));
+  #endif
+  #ifdef USE_IVAN_SUPERVISOR
+  sList->push_back(ServiceInit("IvanSupervisor", RebootDetectorService::APPLICATION, []() {
+    services.ivanSupervisor->init(services.eventLoop, services.commandMgr,
+      services.systemService, services.rebootDetector,
+      services.buttonService, services.eepromLfs, services.wifiService,
+      services.rtcPcf8563, services.sim7000, services.ina3221, services.tempService,
+#ifdef USE_AM2320
+      services.am2320Service,
+#endif
+#ifdef USE_BLE
+      services.ble,
+#endif
+#ifdef USE_ESP32I2C
+      services.esp32i2c,
+#endif
+#ifdef USE_LED_INDICATOR
+      services.ledIndicatorService,
+#endif
+      services.logMgr); }));
+  #endif
+  #ifdef USE_LED_SPHERE
+  sList->push_back(ServiceInit("LedSphere", RebootDetectorService::APPLICATION, []() {
+    services.ledSphere->init(services.eventLoop, services.commandMgr, services.logMgr,
+      services.systemService, services.buttonService, services.beeperService,
+      services.ledService, services.ota); }));
+  #endif
+  #ifdef USE_GPSDO
+  sList->push_back(ServiceInit("GpsdoFreqCounter", RebootDetectorService::APPLICATION, []() {
+    services.gpsdo->init(services.eventLoop, services.systemService,
+#ifdef USE_MQTT
+      services.mqttService,
+#endif
+      services.commandMgr, services.logMgr);
+  }));
+  #endif
+  #ifdef USE_HEATER
+  sList->push_back(ServiceInit("Heater", RebootDetectorService::APPLICATION, []() {
+    services.heater->init(services.eventLoop, services.systemService,
+#ifdef USE_MQTT
+      services.mqttService,
+#endif
+      services.commandMgr, services.logMgr);
+  }));
+  #endif
+  sList->push_back(ServiceInit("WebServer", RebootDetectorService::INFRASTRUCTURE, []() {
+    auto startWebServerCallback = [](bool isStandalone) {
+      Serial.println("Initializing web server after wifi started");
+      extern void startWebServer();
+      startWebServer();
+      Serial.println("Web server initialized after wifi started");
+    };
+    services.wifiService->onStart(startWebServerCallback);
+    // if we're already connected, onStart() won't be called, so call it explicitly
+    WifiAsyncService::WifiStatus wifiStatus = services.wifiService->getStatus();
+    if (wifiStatus == WifiAsyncService::WifiStatus::CONNECTED
+        || wifiStatus == WifiAsyncService::WifiStatus::STANDALONE) {
+      Serial.println("Wifi is started, calling web server initialization immediately");
+      startWebServerCallback(wifiStatus == WifiAsyncService::WifiStatus::STANDALONE);
+    }
+
+    // services.wifiService->onStop([this]() {
+    //   Serial.println("Stopping web server");
+    //   stopWebServer();
+    //   Serial.println("Web server stopped");
+    // });
+  }));
+
+  // rest of initialization, must keep the event loop running
+
+  mainDfa.init(services.eventLoop, services.logMgr->newLogger("mainDfa"), MAIN_INIT_START);
+
+  struct DfaState {
+    int initLoopIdx;
+    int isLastServiceInitialized;
+  } *dfaState = new DfaState();
+
+#ifdef USE_REBOOT_DETECTOR
+  Serial.printf("Reboot detector level: %d (%s)\n",
+    services.rebootDetector->getRebootLevel(), services.rebootDetector->getRebootLevelStr());
+#endif
+
+  mainDfa.onInput([dfaState, sList](Dfa *dfa, Dfa::State state, Dfa::Input input) {
+    if (dfaState->initLoopIdx < sList->size()) {
+      Serial.printf("On mainDfa, initialization step %d/%d (%s)\n", dfaState->initLoopIdx, sList->size(),
+          (*sList)[dfaState->initLoopIdx].name);
+    } else {
+      Serial.printf("On mainDfa, initialization step %d/%d (out of range!)\n", dfaState->initLoopIdx, sList->size());
+    }
+
+    if (state.is(MAIN_INIT_START)) {
+
+      if (input.is(Dfa::Input::ENTER_STATE)) {
+        dfaState->initLoopIdx = 0;
+        dfaState->isLastServiceInitialized = false;
+
+        String info;
+        services.systemService->getInfo(&info);
+        Serial.println(info);
+        services.systemService->getResetReason(&info);
+        Serial.printf("Reset reason: %s\n", info.c_str());
+        if (services.systemService->isResetReasonUnexpected()) {
+          int d = 2;
+          Serial.printf("Delaying further initialization %d seconds because of the reset reason \"%s\"\n",
+                d, info.c_str());
+          return dfa->transitionTo(MAIN_INIT_LOOP, d * 1000);
+        } else {
+          return dfa->transitionTo(MAIN_INIT_LOOP, 1);
+        }
+      } else {
+        return dfa->transitionError();
+      }
+
+    } else if (state.is(MAIN_INIT_LOOP)) {
+
+      if (input.is(Dfa::Input::TIMEOUT)) {
+        unsigned long tm = millis();
+
+        uint32_t totalHeap = ESP.getHeapSize();
+        uint32_t freeHeapBefore = ESP.getFreeHeap();
+
+        ServiceInit *sInit = &(*sList)[dfaState->initLoopIdx];
+        #ifdef USE_REBOOT_DETECTOR
+        if (services.rebootDetector != nullptr && services.rebootDetector->getRebootLevel() >= sInit->rebootLevel) {
+          Serial.printf("Initializing %s...\n", sInit->name);
+          sInit->init();
+          uint32_t freeHeapAfter = ESP.getFreeHeap();
+          Serial.printf("Initialized %s in %d millis, used %d heap memory out of total %d, free heap %d\n",
+            sInit->name, (int)(millis() - tm), freeHeapAfter - freeHeapBefore, totalHeap, freeHeapAfter);
+        } else {
+          Serial.printf("Skipped initialization of %s because of too many quick reboots (reboot level %d %s)\n",
+            sInit->name, sInit->rebootLevel >= services.rebootDetector->getRebootLevel(),
+            services.rebootDetector->getRebootLevelStr());
+        }
+        #else
+        Serial.printf("Initializing %s...\n", sInit->name);
+        sInit->init();
+        uint32_t freeHeapAfter = ESP.getFreeHeap();
+        Serial.printf("Initialized %s in %d millis, used %d heap memory out of total %d, free heap %d\n",
+          sInit->name, (int)(millis() - tm), freeHeapAfter - freeHeapBefore, totalHeap, freeHeapAfter);
+        #endif
+
+        ++dfaState->initLoopIdx;
+
+        if (dfaState->initLoopIdx == sList->size()) {
+          dfaState->isLastServiceInitialized = true;
+          return dfa->transitionTo(MAIN_INIT_DONE);
+        } else {
+          dfa->setStateTimeout(1);
+          return dfa->noTransition();
+        }
+      } else {
+        return dfa->transitionError();
+      }
+
+    } else if (state.is(MAIN_INIT_DONE)) {
+
+      if (input.is(Dfa::Input::ENTER_STATE)) {
+        Serial.println("Initialization terminated");
+// FX        delete dfaState;
+        return dfa->noTransition();
+      } else {
+        return dfa->transitionError();
+      }
+
+    } else {
+
+      return dfa->transitionError();
+
+    }
+  });
+
+  stateTs = millis();
+
+  Serial.println("End of setup()");
+
+} // end of setup()
 
 #ifdef USE_JS
   duk_context *ctx = duk_create_heap_default();
@@ -254,122 +649,21 @@ void setup() {
   duk_destroy_heap(ctx);
 #endif
 
-  bool spiffsOk = SPIFFS.begin(false); // true: if not formatted, format
-  if (!spiffsOk) {
-    Serial.println("SPIFFS not formatted, formatting...");
-    spiffsOk = SPIFFS.begin(true);
-    Serial.printf("SPIFFS formatting %s\n", spiffsOk ? "OK" : " failure");
+
+void startWebServer()
+{
+  if (services.isWsServerInitialized) {
+    return;
   }
+  Serial.println("Starting web server");
 
-  WiFi.setAutoConnect(true);
-  WiFi.setAutoReconnect(true);
-  WiFi.persistent(true);
+  // Initialize web server
+  services.wsServer->init(services.server, services.commandMgr, services.systemService, services.rebootDetector, services.logMgr);
+  services.isWsServerInitialized = true;
 
-  Serial.println("Starting AutoConnect");
+  services.commandHttpServer->init(services.server, services.commandMgr, services.logMgr);
 
-  AutoConnectConfig cfg;
-  cfg.psk = AUTOCONNECT_PSK;
-
-  String macAddress = WiFi.macAddress();
-  String hostName = (macAddress.length() != 17 ? String("esp32-xx")
-      : String("esp32-") + macAddress[12] + macAddress[13] + macAddress[15] + macAddress[16]);
-  cfg.apid = hostName;
-  cfg.hostName = hostName;
-  cfg.autoReconnect = true; // true: connect to old SSIDs, if not possible to currently selected SSID
-  cfg.autoRise = true; // false: disable captive portal
-  cfg.immediateStart = false; // true: start captive portal without trying to connect to selected SSID
-  cfg.portalTimeout = 60000; // millis timeout of captive portal - portal.begin() will return
-                              // even if no connection was made to the portal to set SSID
-  cfg.retainPortal = true; // true: keep running the portal even after portal timed out (portalTimeout)
-  cfg.boundaryOffset = 0; // defaults to 0, offset in EEPROM data to store credentials
-
-
-// !!!!!!!!!!!!!!!!! TODO WORK IN PROGRESS
-
-  // see if we have a configuration file that has other values for autoconnect configuration
-  if (SPIFFS.exists("/autoconnect.json")) {
-    File autoConnectParamsFile = SPIFFS.open("/autoconnect.json", "r");
-    DynamicJsonBuffer buf;
-    JsonObject &params = buf.parseObject(autoConnectParamsFile);
-    autoConnectParamsFile.close();
-    if (params.success()) {
-      Serial.println("Contents of /autoconnect.json:");
-      params.prettyPrintTo(Serial);
-      Serial.println();
-      JsonObject &autoconnect = params["autoconnect"];
-      cfg.psk = autoconnect["psk"] | cfg.psk;
-      cfg.autoReconnect = autoconnect["autoReconnect"] | cfg.autoReconnect;
-      cfg.autoRise = autoconnect["autoRise"] | cfg.autoRise;
-      cfg.immediateStart = autoconnect["immediateStart"] | cfg.immediateStart;
-      cfg.portalTimeout = autoconnect["portalTimeout"] | cfg.portalTimeout;
-      cfg.retainPortal = autoconnect["retainPortal"] | cfg.retainPortal;
-      Serial.printf("Merged from /autoconnect.json:\n"
-        "    psk: %s\n"
-        "    autoReconnect: %s\n"
-        "    autoRise: %s\n"
-        "    immediateStart: %s\n"
-        "    portalTimeout: %ld\n"
-        "    retainPortal: %s\n",
-        cfg.psk.c_str(),
-        cfg.autoReconnect ? "true" : "false", cfg.autoRise ? "true" : "false",
-        cfg.immediateStart ? "true" : "false", cfg.portalTimeout, cfg.retainPortal ? "true" : "false"
-      );
-    } else {
-      Serial.println("Error reading /autoconnect.json, file ignored");
-    }
-  }
-
-  //#define WIFI_FORCE_STANDALONE
-  #ifdef WIFI_FORCE_STANDALONE
-  cfg.autoReconnect = false;
-  cfg.autoRise = true;
-  cfg.immediateStart = true;
-  cfg.portalTimeout = 1; // millis timeout of captive portal - portal.begin() will return
-  // if set to a high value, any http call that comes in between resets the timeout, so we never time out
-  #endif
-  //#define WIFI_FORCE_CONNECTED
-  #ifdef WIFI_FORCE_CONNECTED
-  cfg.autoReconnect = true;
-  cfg.autoRise = true;
-  cfg.immediateStart = false;
-  cfg.portalTimeout = 10000;
-  #endif
-
-  services.autoConnectPortal->config(cfg);
-
-  services.autoConnectServer->on("/clear", [&cfg]() {
-    AutoConnectCredential acCred(cfg.boundaryOffset);
-    int acEntries = acCred.entries();
-    for (int i = acEntries - 1; i >= 0; i--) {
-      station_config_t config;
-      acCred.load(i, &config);
-      acCred.del(reinterpret_cast<char*>(&config.ssid));
-    }
-    services.autoConnectServer->send(200, "text/plain", F("Cleared all saved connection information!"));
-  });
-
-  bool isConnected = services.autoConnectPortal->begin();
-  Serial.printf("AutoConnect returned, isConnected = %d\n", isConnected);
-  if (isConnected) {
-    Serial.println("WiFi connected: " + WiFi.localIP().toString());
-  } else {
-    Serial.println("WiFi not connected, access point address: " + WiFi.softAPIP().toString());
-  }
-
-  MDNS.begin(hostName.c_str());
-  MDNS.addService("_http", "_tcp", 8080);
-//  MDNS.addService("_http", "_tcp", 80); // Looks like mDNS doesn't like two _http services in two different ports
-
-  services.ota->init(services.server, services.logMgr, []() { return true; }, [](bool succeeded) { mustReboot = succeeded; } );
-  Serial.println("OTA update service initialized");
-
-  services.commandMgr->init(services.eventLoop);
-
-//  services.service->init(services.eventLoop);
-
-  services.wsServer->init(services.server, services.commandMgr);
-
-  services.commandHttpServer->init(services.server, services.commandMgr);
+  String hostName = services.wifiService->getHostName();
 
 #ifdef USE_SPIFFS_EDITOR
   Serial.printf("SPIFFS editor available on http://%s.local:8080/edit\n", hostName.c_str());
@@ -382,119 +676,31 @@ void setup() {
   });
 
   services.server->serveStatic("/", SPIFFS, "/").setDefaultFile("index.htm");
+#ifdef USE_EEPROM_LFS
+  if (services.eepromLfs->getFs() != nullptr) {
+#ifdef USE_SPIFFS_EDITOR
+    Serial.printf("EEPROMLittleFs editor available on http://%s.local:8080/edit_eeprom\n", hostName.c_str());
+    services.server->addHandler(new SPIFFSEditor(*services.eepromLfs->getFs(), "/edit_eeprom", SPIFFS_EDITOR_USER, SPIFFS_EDITOR_PWD));
+#endif
+    services.server->serveStatic("/eeprom", *services.eepromLfs->getFs(), "/").setDefaultFile("index.htm");
+  } else {
+    Serial.printf("EEPROMLittleFs editor not available, as the filesystem is not initialized\n");
+  }
+#endif
 
   extern void setupServerNotFound(AsyncWebServer *server);
 
   setupServerNotFound(services.server);
 
   services.server->begin();
-  Serial.println("Async web server initialized at port 8080");
+  Serial.println("Web server started at port 8080");
 
-  ServiceCommands *cmd = services.commandMgr->getServiceCommands("i2c");
-  cmd->registerIntData(
-    ServiceCommands::IntDataBuilder("sdaPin", true)
-    .cmd("sdaPin")
-    .help("--> Set SDA pin for Wire interface. Valid at next reboot, must be saved.")
-    .vMin(1)
-    .vMax(99)
-    .ptr(&sdaPin)
-  );
-  cmd->registerIntData(
-    ServiceCommands::IntDataBuilder("sclPin", true)
-    .cmd("sclPin")
-    .help("--> Set SCL pin for Wire interface. Valid at next reboot, must be saved.")
-    .vMin(1)
-    .vMax(99)
-    .ptr(&sclPin)
-  );
-  cmd->registerBoolData(
-    ServiceCommands::BoolDataBuilder("scan", true)
-    .isPersistent(false)
-    .cmdOn("scan")
-    .helpOn("--> Scan the i2c bus")
-    .setFn([](int val, bool isLoading, String *msg) -> bool {
-      *msg = "Scanning i2c bus:\n";
-      int n = 0;
-      for (int addr = 1; addr <= 127; addr++) {
-        Wire.beginTransmission(addr);
-        int r = Wire.endTransmission();
-        if (r == I2C_ERROR_OK) {
-          *msg += "    Device at address " + String(addr) + " (0x" + String(addr, HEX) + ")\n";
-          ++n;
-        } else if (r != I2C_ERROR_ACK) {
-          *msg += "    Error at address " + String(addr) + " (0x" + String(addr, HEX) + "), error code: " + String(r) + "\n";
-        }
-      }
-      *msg += "End of scan, " + String(n) + " devices found";
-      return true;
-    })
-  );
-
-  sdaPin = WIRE0_SDA;
-  sclPin = WIRE0_SCL;
-
-  String msg;
-  bool rc;
-  rc = cmd->load(nullptr, &msg);
-  if (rc) {
-    String keyName;
-    cmd->getCurrentKeyName(&keyName);
-    Serial.printf("Loaded config for %s/%s\n", cmd->getServiceName(), keyName.c_str());
-  }
-
-  // "system" command
-
-  ServiceCommands *cmdSystem = services.commandMgr->getServiceCommands("system");
-  cmdSystem->registerBoolData(
-    ServiceCommands::BoolDataBuilder("reboot", true)
-    .cmdOn("reboot")
-    .isPersistent(false)
-    .includeInStatus(false)
-    .helpOn("--> Reboot the microcontroller")
-    .setFn([](bool val, bool isLoading, String *msg) {
-      mustReboot = true;
-      return true;
-    })
-  );
-
-  cmdSystem->onAfterStatus([](String *msg) {
-      getInfo(msg);
-      *msg += "\n";
-      return true;
-  });
-
-  // eventLoop and commandMgr must have been initialized
-  Serial.println("Initializing LogService");
-  services.logService->init(services.logMgr, services.eventLoop, services.commandMgr);
-  Serial.println("Initialized LogService");
-
-#ifdef USE_HEARTBEAT
-  services.heartbeatService->init(services.eventLoop, services.commandMgr);
-  Serial.println("Heartbeat service initialized");
-#endif
-
-#ifdef USE_LM75A_TEMP
-  Wire.begin(sdaPin, sclPin, 100000);
-  services.tempService->init(&eventLoop, &commandMgr);
-  Serial.println("LM75A Temp service initialized");
-#endif
-
-#ifdef USE_LED
-  services.ledService->init(&eventLoop, &commandMgr);
-  Serial.println("Led service initialized");
-#endif
-
-#ifdef USE_STEPPER
-  services.stepper->init(services.eventLoop, services.commandMgr, services.logMgr);
-  Serial.println("Stepper service initialized");
-#endif
-
-  stateTs = millis();
+} // initWebServer()
 
 #ifdef USE_HW_SD_CARD
 
   Serial.println("Testing SD card");
-// ATTENTION: pins 13, 14, 15 arre used for JTAG
+// ATTENTION: pins 13, 14, 15 are used for JTAG
   int8_t sck = 14;
   int8_t miso = 33;
   int8_t mosi = 13;
@@ -517,8 +723,7 @@ void setup() {
   Serial.println("Testing SD card finished");
 #endif
 
-}
-
+#ifdef USE_HW_SD_CARD
 void printDirectory(File dir, int numTabs) {
 
   while (true) {
@@ -543,21 +748,69 @@ void printDirectory(File dir, int numTabs) {
      entry.close();
    }
 }
+#endif
+
+Logger *mainLogger = nullptr;
+unsigned lastWsCleanup = millis();
+String serialCommand("");
 
 void loop()
 {
-  static unsigned lastWsCleanup = millis();
-
-  services.autoConnectPortal->handleClient();
-  services.eventLoop->runOnce(100); // delay if nothing is to be done -- so we can run autoConnectPortal.handleClient()
+  services.eventLoop->runOnce(50);
+  if (mainDfa.getState() != MAIN_INIT_DONE) {
+    return; // during initialization just run the event loop, nothing else
+  }
 
   unsigned tm = millis();
   if (tm - lastWsCleanup >= 1000) {
-    services.wsServer->cleanupClients();
+    if (services.isWsServerInitialized) {
+      services.wsServer->cleanupClients();
+    }
     lastWsCleanup = tm;
   }
+  if (mainLogger == nullptr) {
+    mainLogger = services.logMgr->newLogger("mainDfa");
+  }
 
-  if (mustReboot) {
+  while (Serial && Serial.available()) {
+    int c = Serial.read();
+    if (c == -1) {
+      break; // nothing more to read
+    }
+
+    // echo
+    Serial.write(c);
+    Serial.flush();
+
+    if (c == '\n') {
+      String cmd = serialCommand;
+      cmd.trim();
+      if (cmd == "") {
+        continue;
+      }
+      bool processed = services.commandMgr->processCommandLine("Serial", &cmd);
+      if (processed) {
+        Serial.println(cmd);
+      } else {
+        Serial.println("Command not processed");
+      }
+      serialCommand.clear();
+    } else if (c == '\b') {
+      if (serialCommand.length() > 0) {
+        serialCommand.remove(serialCommand.length() - 1);
+        Serial.print("^h ^h");
+        Serial.flush();
+      }
+    } else if (c != '\r') { // ignoring \r
+      if (serialCommand.length() < 2000) {
+        // else command line too long, forget it
+        serialCommand.concat((char)c);
+      }
+    }
+
+  }
+
+  if (services.systemService->mustReboot()) {
     ESP.restart();
   }
 }

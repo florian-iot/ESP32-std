@@ -1,0 +1,27 @@
+{
+  "default": {
+    "isEnabled": false,
+    "ledStart": 84,
+    "ledCount": 27,
+    "mapping": true,
+    "valMin": 0,
+    "valMax": 64,
+    "lengthLeds": 8,
+    "trailingPct": 50,
+    "trailingGamma": 0.01,
+    "leadingPct": 40,
+    "leadingGamma": 0.01,
+    "saturation": 255,
+    "hueStart": 0,
+    "hueStartRandom": false,
+    "hueStartSeqChange": 25,
+    "whiteAsRandomHuePct": 2,
+    "hueShiftInShape": 40,
+    "hueShiftInRun": 0,
+    "pauseIsExponential": false,
+    "pauseDurationAvgMillis": 1,
+    "pauseDurationMaxMillis": 1,
+    "speedLedsPerSec": 10
+  },
+  "defaultKey": "default"
+}

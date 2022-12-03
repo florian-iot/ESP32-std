@@ -8,6 +8,7 @@
 #include <WString.h>
 #include <ArduinoJson.h>
 #include "UEvent.h"
+#include "System.h"
 
 class StaticString {
 private:
@@ -52,7 +53,7 @@ public:
    */
   struct ParamData {
     enum Type {
-      INT_DATA, FLOAT_DATA, BOOL_DATA, STRING_DATA
+      INT_DATA, FLOAT_DATA, BOOL_DATA, STRING_DATA, JSON_DATA, PIN_DATA
     };
     Type type;
     ConstString name;
@@ -80,6 +81,7 @@ public:
     IntData(const char *name, bool isConstant);
     IntData(const String *name);
     virtual void addStatusInfo(String *msg);
+    virtual void addMenuInfo(JsonObject *menuInfo);
     virtual bool load(const JsonVariant &val, bool isCheckOnly, String *msg);
     virtual void save(JsonBuffer *buf, JsonObject *params);
   };
@@ -122,6 +124,7 @@ public:
     FloatData(const char *name, bool isConstant);
     FloatData(const String *name);
     virtual void addStatusInfo(String *msg);
+    virtual void addMenuInfo(JsonObject *menuInfo);
     virtual bool load(const JsonVariant &val, bool isCheckOnly, String *msg);
     virtual void save(JsonBuffer *buf, JsonObject *params);
   };
@@ -214,6 +217,7 @@ public:
     StringData(const char *name, bool isConstant);
     StringData(const String *name);
     virtual void addStatusInfo(String *msg);
+    virtual void addMenuInfo(JsonObject *menuInfo);
     virtual bool load(const JsonVariant &val, bool isCheckOnly, String *msg);
     virtual void save(JsonBuffer *buf, JsonObject *params);
   };
@@ -240,6 +244,72 @@ public:
     StringDataBuilder &getFn(std::function<void(String *)> fn) { data->getFn = fn; return *this; }
 
     StringData *getData() const { return data; }
+  };
+
+  struct SysPinData: public ParamData {
+    SysPin *ptr;
+    std::function<bool(int val, bool isLoading, String *msg)> setFn;
+    std::function<int()> getFn;
+    uint32_t event;
+    SysPinData(const char *name, bool isConstant);
+    SysPinData(const String *name);
+    virtual void addStatusInfo(String *msg);
+    virtual void addMenuInfo(JsonObject *menuInfo);
+    virtual bool load(const JsonVariant &val, bool isCheckOnly, String *msg);
+    virtual void save(JsonBuffer *buf, JsonObject *params);
+  };
+
+  class SysPinDataBuilder {
+  private:
+    SysPinData *data;
+  public:
+    SysPinDataBuilder(SysPin *pin) {
+      data = new SysPinData(pin->getName(), true);
+      data->cmd.set(pin->getName(), true);
+      data->ptr = pin;
+    }
+    SysPinDataBuilder &isPersistent(bool p) { data->isPersistent = p; return *this; }
+    SysPinDataBuilder &includeInStatus(bool p) { data->includeInStatus = p; return *this; }
+    SysPinDataBuilder &help(const char *h, bool isConstant) { data->help.set(h, isConstant); return *this; }
+    SysPinDataBuilder &help(const String h) { data->help.set(h); return *this; }
+    SysPinDataBuilder &setFn(std::function<bool(int val, bool isLoading, String *msg)> fn) { data->setFn = fn; return *this; }
+
+    SysPinData *getData() const { return data; }
+  };
+
+  struct JsonData: public ParamData {
+    std::function<bool(const JsonVariant &val, bool isLoading, String *msg)> setFn;
+    std::function<JsonVariant (JsonBuffer &buf)> getFn;
+    uint32_t event;
+    JsonData(const char *name, bool isConstant);
+    JsonData(const String *name);
+    virtual void addStatusInfo(String *msg);
+    virtual void addMenuInfo(JsonObject *menuInfo);
+    virtual bool load(const JsonVariant &val, bool isCheckOnly, String *msg);
+    virtual void save(JsonBuffer *buf, JsonObject *params);
+  };
+
+  class JsonDataBuilder {
+  private:
+    JsonData *data;
+  public:
+    JsonDataBuilder(const char *name, bool isConstant) {
+      data = new JsonData(name, isConstant);
+    }
+    JsonDataBuilder(const String *name) {
+      data = new JsonData(name);
+    }
+    JsonDataBuilder &cmd(const char *cmd, bool isConstant) { data->cmd.set(cmd, isConstant); return *this; }
+    JsonDataBuilder &cmd(const String &cmd) { data->cmd.set(cmd); return *this; }
+    JsonDataBuilder &isPersistent(bool p) { data->isPersistent = p; return *this; }
+    JsonDataBuilder &help(const char *h, bool isConstant) { data->help.set(h, isConstant); return *this; }
+    JsonDataBuilder &help(const String &h) { data->help.set(h); return *this; }
+    JsonDataBuilder &includeInStatus(bool b) { data->includeInStatus = b; return *this; }
+
+    JsonDataBuilder &setFn(std::function<bool(const JsonVariant &val, bool isLoading, String *msg)> fn) { data->setFn = fn; return *this; }
+    JsonDataBuilder &getFn(std::function<JsonVariant (JsonBuffer &buf)> fn) { data->getFn = fn; return *this; }
+
+    JsonData *getData() const { return data; }
   };
 
   CommandMgr *cmdMgr;
@@ -271,6 +341,8 @@ public:
   void registerFloatData(FloatDataBuilder &data);
   void registerBoolData(BoolDataBuilder &data);
   void registerStringData(StringDataBuilder &data);
+  void registerSysPinData(SysPinDataBuilder &data);
+  void registerJsonData(JsonDataBuilder &data);
 
   void onBeforeLoad(std::function<bool(String *msg)> beforeLoadFn) { this->beforeLoadFn = beforeLoadFn; }
   void onAfterLoad(std::function<void(String *msg)> afterLoadFn) { this->afterLoadFn = afterLoadFn; }
@@ -369,10 +441,12 @@ private:
     SemaphoreHandle_t eventSem;
 
     int cmdInternalMenuInfo;
+    int cmdInternalMenuList;
 
     std::vector<ServiceCommands*> serviceCommands;
 
-  void getMenuInfo(String &buf);
+  void getMenuList(String &buf);
+  void getMenuInfo(const char *menuName, String &buf);
 
 public:
     static bool getIntValue(UEvent *event, int *val);
@@ -388,9 +462,6 @@ public:
     void init(UEventLoop *eventLoop);
 
     UEventLoop *getEventLoop();
-
-    // void addMenuInfo(String *menuInfo);
-    // void addMenuInfo(const char *fileName);
 
     void addCommand(const char *commandClass, const char *command);
 

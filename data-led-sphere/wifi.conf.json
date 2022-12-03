@@ -1,0 +1,10 @@
+{
+  "default": {
+    "autoStart": true,
+    "apOnly": true,
+    "apIp": "192.168.4.1",
+    "apPassword": "31415926",
+    "hostname": "esp32-ledsphere"
+  },
+  "defaultKey": "default"
+}
